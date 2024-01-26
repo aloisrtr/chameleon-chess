@@ -1,13 +1,32 @@
+//! Main API to represent and interact with a chess position.
+//!
+//! This includes making, unmaking and generating moves, defining positions from
+//! FEN strings, etc.
 use std::hint::unreachable_unchecked;
 
 use arrayvec::ArrayVec;
 
 use crate::{
     bitboard::Bitboard,
-    r#move::{CastleKind, LegalMove, Move, MoveKind},
+    r#move::{LegalMove, Move},
     square::{Delta, File, Rank, Square},
 };
 
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+pub struct IllegalMoveError;
+
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+// TODO: Better FEN parsing error reports.
+/// FEN parsing errors.
+pub enum FenError {
+    UnexpectedToken { index: usize, val: char },
+    Incomplete,
+    NonAscii,
+    ParseError,
+    IncompletePieceSection,
+}
+
+/// An entry in the sliders' move lookup table.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 struct SliderTableEntry {
     magic: u64,
@@ -30,15 +49,17 @@ impl SliderTableEntry {
     }
 }
 
+/// Records non-reversible informations that are lost when making a move.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 struct HistoryEntry {
-    pub played: Move,
+    pub played: LegalMove,
     pub captured: Option<PieceKind>,
     pub castling_rights: u8,
     pub reversible_moves: u8,
     pub en_passant_file: Option<File>,
 }
 
+/// Existing types of pieces.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum PieceKind {
@@ -66,6 +87,8 @@ impl std::fmt::Display for PieceKind {
     }
 }
 
+/// Represents a valid chess position and defines an API to interact with said
+/// position (making, unmaking, generating moves, etc).
 #[derive(Debug)]
 pub struct Position {
     // 8x8 array to find which piece sits on which square.
@@ -84,6 +107,7 @@ pub struct Position {
     history: ArrayVec<HistoryEntry, 1024>,
 }
 impl Default for Position {
+    /// A position with no pieces.
     fn default() -> Self {
         Self {
             pieces: [None; 64],
@@ -114,47 +138,47 @@ impl Position {
     /// # Errors
     /// This function returns an error if the FEN string passed is invalid or badly
     /// formatted.
-    pub fn from_fen(fen: &str) -> Result<Self, ()> {
+    pub fn from_fen(fen: &str) -> Result<Self, FenError> {
         if !fen.is_ascii() {
-            return Err(());
+            return Err(FenError::NonAscii);
         }
 
         let mut position = Self::empty();
 
         let sections = fen.split_ascii_whitespace().collect::<Vec<_>>();
-        let pieces = sections.get(0).ok_or(())?;
+        let pieces = sections.first().ok_or(FenError::Incomplete)?;
         let mut squares = Square::squares_fen_iter();
         for c in pieces.chars() {
             let black = c.is_ascii_lowercase();
             unsafe {
                 match c.to_ascii_lowercase() {
                     'p' => position.add_piece_unchecked(
-                        squares.next().ok_or(())?,
+                        squares.next().ok_or(FenError::IncompletePieceSection)?,
                         PieceKind::Pawn,
                         black,
                     ),
                     'n' => position.add_piece_unchecked(
-                        squares.next().ok_or(())?,
+                        squares.next().ok_or(FenError::IncompletePieceSection)?,
                         PieceKind::Knight,
                         black,
                     ),
                     'b' => position.add_piece_unchecked(
-                        squares.next().ok_or(())?,
+                        squares.next().ok_or(FenError::IncompletePieceSection)?,
                         PieceKind::Bishop,
                         black,
                     ),
                     'r' => position.add_piece_unchecked(
-                        squares.next().ok_or(())?,
+                        squares.next().ok_or(FenError::IncompletePieceSection)?,
                         PieceKind::Rook,
                         black,
                     ),
                     'q' => position.add_piece_unchecked(
-                        squares.next().ok_or(())?,
+                        squares.next().ok_or(FenError::IncompletePieceSection)?,
                         PieceKind::Queen,
                         black,
                     ),
                     'k' => position.add_piece_unchecked(
-                        squares.next().ok_or(())?,
+                        squares.next().ok_or(FenError::IncompletePieceSection)?,
                         PieceKind::King,
                         black,
                     ),
@@ -162,46 +186,53 @@ impl Position {
                     digit if digit.is_ascii_digit() => {
                         let skip = digit.to_digit(10).unwrap() as usize;
                         if skip > 8 {
-                            return Err(());
+                            return Err(FenError::UnexpectedToken {
+                                index: 0,
+                                val: digit,
+                            });
                         }
                         for _ in 0..skip {
                             squares.next();
                         }
                     }
-                    _ => return Err(()),
+                    c => return Err(FenError::UnexpectedToken { index: 0, val: c }),
                 }
             }
         }
 
-        position.black_to_move = match *sections.get(1).ok_or(())? {
+        position.black_to_move = match *sections.get(1).ok_or(FenError::Incomplete)? {
             "w" => false,
             "b" => true,
-            _ => return Err(()),
+            _ => return Err(FenError::UnexpectedToken { index: 0, val: '0' }),
         };
 
         position.castling_rights = {
             let mut rights = 0;
             let mut empty = false;
-            for c in sections.get(2).ok_or(())?.chars() {
+            for c in sections.get(2).ok_or(FenError::Incomplete)?.chars() {
                 match c {
-                    'k' => rights |= Self::KINGSIDE_RIGHT_MASK[1],
-                    'q' => rights |= Self::QUEENSIDE_RIGHT_MASK[1],
-                    'K' => rights |= Self::KINGSIDE_RIGHT_MASK[0],
-                    'Q' => rights |= Self::QUEENSIDE_RIGHT_MASK[0],
+                    'k' => rights |= 0b0001,
+                    'q' => rights |= 0b0010,
+                    'K' => rights |= 0b0100,
+                    'Q' => rights |= 0b1000,
                     '-' => empty = true,
-                    _ => return Err(()),
+                    c => return Err(FenError::UnexpectedToken { index: 0, val: c }),
                 }
             }
 
             if (rights == 0) ^ empty {
-                return Err(());
+                return Err(FenError::ParseError);
             }
             rights
         };
 
-        position.en_passant_file = match *sections.get(3).ok_or(())? {
+        position.en_passant_file = match *sections.get(3).ok_or(FenError::Incomplete)? {
             "-" => None,
-            s => Some(s.parse::<Square>()?.file()),
+            s => Some(
+                s.parse::<Square>()
+                    .map_err(|_| FenError::ParseError)?
+                    .file(),
+            ),
         };
 
         position.reversible_moves = sections.get(4).unwrap_or(&"0").parse().unwrap();
@@ -226,19 +257,28 @@ impl Position {
 
     /// Returns the piece kind and color sitting on a given square if any.
     pub fn piece_on(&self, square: Square) -> Option<(PieceKind, bool)> {
-        self.pieces[square as usize].map(|kind| {
-            (
-                kind,
-                self.color_bitboards[!self.black_to_move as usize].is_set(square),
-            )
-        })
+        self.pieces[square as usize].map(|kind| (kind, self.color_bitboards[1].is_set(square)))
     }
 
     /// Makes a move on the board, modifying the position.
     /// # Errors
     /// This function returns an error if the move is illegal.
-    pub fn make(&mut self, mv: Move) -> Result<(), ()> {
-        todo!()
+    pub fn make(
+        &mut self,
+        Move {
+            origin,
+            target,
+            promotion,
+        }: Move,
+    ) -> Result<(), IllegalMoveError> {
+        if let Some(&mv) = self.moves().iter().find(|mv| {
+            mv.origin() == origin && mv.target() == target && mv.is_promotion() == promotion
+        }) {
+            unsafe { self.make_unchecked(mv) };
+            Ok(())
+        } else {
+            Err(IllegalMoveError)
+        }
     }
 
     /// Makes a move on the board, modifying the position.
@@ -249,854 +289,801 @@ impl Position {
     /// As a general rule of thumb, only use this function with moves generated
     /// from the position as they are guaranteed to be legal.
     #[inline]
-    pub unsafe fn make_unchecked(
-        &mut self,
-        mv @ Move {
-            origin,
-            target,
-            kind,
-        }: Move,
-    ) {
-        let move_bitboard = origin.bitboard() | target.bitboard();
-        let Some(mut moving_kind) = self.pieces[origin as usize] else {
-            unreachable_unchecked()
-        };
+    pub unsafe fn make_unchecked(&mut self, mv: LegalMove) {
+        #[inline(always)]
+        unsafe fn make_unchecked_generic<const BLACK_TO_MOVE: bool>(
+            position: &mut Position,
+            mv: LegalMove,
+        ) {
+            let origin = mv.origin();
+            let target = mv.target();
+            let move_bitboard = origin.bitboard() | target.bitboard();
+            let Some(mut moving_kind) = position.pieces.get_unchecked(origin as usize) else {
+                unreachable_unchecked()
+            };
 
-        self.history.push(HistoryEntry {
-            played: mv,
-            captured: self.pieces[target as usize],
-            castling_rights: self.castling_rights,
-            reversible_moves: self.reversible_moves,
-            en_passant_file: self.en_passant_file,
-        });
+            let us_index = BLACK_TO_MOVE as usize;
+            let them_index = !BLACK_TO_MOVE as usize;
 
-        // Reset en passant file if any
-        self.en_passant_file = None;
+            position.history.push_unchecked(HistoryEntry {
+                played: mv,
+                captured: *position.pieces.get_unchecked(target as usize),
+                castling_rights: position.castling_rights,
+                reversible_moves: position.reversible_moves,
+                en_passant_file: position.en_passant_file,
+            });
 
-        // Take care of move kind specifics
-        match kind {
-            MoveKind::DoublePush => self.en_passant_file = Some(origin.file()),
-            MoveKind::Castle(castle_kind) => {
-                let (rook_origin, rook_target) = if castle_kind == CastleKind::QueenSide {
-                    Self::QUEENSIDE_ROOK_MOVES[self.black_to_move as usize]
+            // Reset en passant file if any
+            position.en_passant_file = None;
+
+            // Modify castling rights if needed
+            for modified in move_bitboard & Bitboard(0x9100000000000091) {
+                match modified {
+                    Square::E1 => position.castling_rights &= !0b1100,
+                    Square::A1 => position.castling_rights &= !0b1000,
+                    Square::H1 => position.castling_rights &= !0b0100,
+                    Square::E8 => position.castling_rights &= !0b0011,
+                    Square::A8 => position.castling_rights &= !0b0010,
+                    Square::H8 => position.castling_rights &= !0b0001,
+                    _ => unreachable_unchecked(),
+                }
+            }
+
+            // Take care of move kind specifics
+            if let Some(to) = mv.is_promotion() {
+                *position
+                    .piece_bitboards
+                    .get_unchecked_mut(PieceKind::Pawn as usize) ^= origin.bitboard();
+                *position.piece_bitboards.get_unchecked_mut(to as usize) ^= origin.bitboard();
+                *position.pieces.get_unchecked_mut(origin as usize) = Some(to);
+                moving_kind = to;
+
+                if mv.is_capture() {
+                    let Some(captured) = *position.pieces.get_unchecked(target as usize) else {
+                        unreachable_unchecked()
+                    };
+                    *position.color_bitboards.get_unchecked_mut(them_index) ^= target.bitboard();
+                    *position
+                        .piece_bitboards
+                        .get_unchecked_mut(captured as usize) ^= target.bitboard();
+                    position.occupancy_bitboard ^= target.bitboard();
+                }
+                position.reversible_moves = 0
+            } else if mv.is_capture() {
+                let target = if mv.special_0_is_set() {
+                    target.translate_unchecked(if BLACK_TO_MOVE {
+                        Delta::North
+                    } else {
+                        Delta::South
+                    })
                 } else {
-                    Self::KINGSIDE_ROOK_MOVES[self.black_to_move as usize]
+                    target
+                };
+                let Some(captured) = *position.pieces.get_unchecked(target as usize) else {
+                    unreachable_unchecked()
+                };
+                *position.color_bitboards.get_unchecked_mut(them_index) ^= target.bitboard();
+                *position
+                    .piece_bitboards
+                    .get_unchecked_mut(captured as usize) ^= target.bitboard();
+                position.occupancy_bitboard ^= target.bitboard();
+                position.reversible_moves = 0
+            } else if mv.special_1_is_set() {
+                let (rook_origin, rook_target) = if mv.special_0_is_set() {
+                    if BLACK_TO_MOVE {
+                        (Square::A8, Square::D8)
+                    } else {
+                        (Square::A1, Square::D1)
+                    }
+                } else if BLACK_TO_MOVE {
+                    (Square::H8, Square::F8)
+                } else {
+                    (Square::H1, Square::F1)
                 };
                 let rook_move = rook_origin.bitboard() | rook_target.bitboard();
-                self.piece_bitboards[PieceKind::Rook as usize] ^= rook_move;
-                self.color_bitboards[self.black_to_move as usize] ^= rook_move;
-                self.occupancy_bitboard ^= rook_move;
-                *self.pieces.get_unchecked_mut(rook_target as usize) =
-                    self.pieces.get_unchecked_mut(rook_origin as usize).take();
+                *position
+                    .piece_bitboards
+                    .get_unchecked_mut(PieceKind::Rook as usize) ^= rook_move;
+                *position.color_bitboards.get_unchecked_mut(us_index) ^= rook_move;
+                position.occupancy_bitboard ^= rook_move;
+                *position.pieces.get_unchecked_mut(rook_target as usize) = position
+                    .pieces
+                    .get_unchecked_mut(rook_origin as usize)
+                    .take();
+                position.reversible_moves = 0
+            } else if mv.special_0_is_set() {
+                position.en_passant_file = Some(origin.file());
+                position.reversible_moves = 0
+            } else if moving_kind != PieceKind::Pawn {
+                position.reversible_moves += 1
+            } else {
+                position.reversible_moves = 0
             }
-            MoveKind::Capture => {
-                let Some(captured) = self.pieces[target as usize] else {
-                    unreachable_unchecked()
-                };
-                self.color_bitboards[!self.black_to_move as usize] ^= target.bitboard();
-                self.piece_bitboards[captured as usize] ^= target.bitboard();
-                self.occupancy_bitboard ^= target.bitboard();
-            }
-            MoveKind::EnPassantCapture => {
-                let captured_square = target.translate_unchecked(if self.black_to_move {
-                    Delta::North
-                } else {
-                    Delta::South
-                });
-                self.color_bitboards[!self.black_to_move as usize] ^= captured_square.bitboard();
-                self.piece_bitboards[PieceKind::Pawn as usize] ^= captured_square.bitboard();
-                self.occupancy_bitboard ^= captured_square.bitboard();
-                self.pieces[captured_square as usize] = None
-            }
-            MoveKind::Promotion(to) => {
-                self.piece_bitboards[PieceKind::Pawn as usize] ^= origin.bitboard();
-                self.piece_bitboards[to as usize] ^= origin.bitboard();
-                self.pieces[origin as usize] = Some(to);
-                moving_kind = to;
-            }
-            MoveKind::PromotionCapture(to) => {
-                self.piece_bitboards[PieceKind::Pawn as usize] ^= origin.bitboard();
-                self.piece_bitboards[to as usize] ^= origin.bitboard();
-                self.pieces[origin as usize] = Some(to);
-                moving_kind = to;
 
-                let Some(captured) = self.pieces[target as usize] else {
-                    unreachable_unchecked()
-                };
-                self.color_bitboards[!self.black_to_move as usize] ^= target.bitboard();
-                self.piece_bitboards[captured as usize] ^= target.bitboard();
-                self.occupancy_bitboard ^= target.bitboard();
-            }
-            _ => {}
+            // Then make the actual move on the board
+            *position.color_bitboards.get_unchecked_mut(us_index) ^= move_bitboard;
+            *position
+                .piece_bitboards
+                .get_unchecked_mut(moving_kind as usize) ^= move_bitboard;
+            position.occupancy_bitboard ^= move_bitboard;
+            *position.pieces.get_unchecked_mut(target as usize) =
+                position.pieces.get_unchecked_mut(origin as usize).take();
+
+            position.black_to_move = !BLACK_TO_MOVE;
         }
 
-        // Then make the actual move on the board
-        self.color_bitboards[self.black_to_move as usize] ^= move_bitboard;
-        self.piece_bitboards[moving_kind as usize] ^= move_bitboard;
-        self.occupancy_bitboard ^= move_bitboard;
-        *self.pieces.get_unchecked_mut(target as usize) =
-            self.pieces.get_unchecked_mut(origin as usize).take();
-
-        // Change metadata accordingly
-        if move_bitboard.intersects(Self::KINGSIDE_REMOVE_MASK[0]) {
-            self.castling_rights &= !Self::KINGSIDE_RIGHT_MASK[0]
-        }
-        if move_bitboard.intersects(Self::KINGSIDE_REMOVE_MASK[1]) {
-            self.castling_rights &= !Self::KINGSIDE_RIGHT_MASK[1]
-        }
-        if move_bitboard.intersects(Self::QUEENSIDE_REMOVE_MASK[0]) {
-            self.castling_rights &= !Self::QUEENSIDE_RIGHT_MASK[0]
-        }
-        if move_bitboard.intersects(Self::QUEENSIDE_REMOVE_MASK[1]) {
-            self.castling_rights &= !Self::QUEENSIDE_RIGHT_MASK[1]
-        }
-
-        if kind == MoveKind::Quiet && moving_kind != PieceKind::Pawn {
-            self.reversible_moves += 1
+        if self.black_to_move {
+            make_unchecked_generic::<true>(self, mv);
         } else {
-            self.reversible_moves = 0
+            make_unchecked_generic::<false>(self, mv);
         }
-        self.black_to_move = !self.black_to_move;
     }
 
     /// Undoes the effects of the last move played, restoring the position as it
     /// was prior to the move.
     ///
     /// If no moves were played prior to calling this function, nothing happens.
+    #[inline]
     pub fn unmake(&mut self) {
-        let Some(HistoryEntry {
-            played:
-                Move {
-                    origin,
-                    target,
-                    kind,
-                },
-            captured,
-            castling_rights,
-            reversible_moves,
-            en_passant_file,
-        }) = self.history.pop()
-        else {
-            return;
-        };
+        #[inline(always)]
+        unsafe fn unmake_generic<const BLACK_TO_MOVE: bool>(
+            position: &mut Position,
+            HistoryEntry {
+                played,
+                captured,
+                castling_rights,
+                reversible_moves,
+                en_passant_file,
+            }: HistoryEntry,
+        ) {
+            let us_index = BLACK_TO_MOVE as usize;
+            let them_index = !BLACK_TO_MOVE as usize;
 
-        // Restore metadata
-        self.castling_rights = castling_rights;
-        self.reversible_moves = reversible_moves;
-        self.en_passant_file = en_passant_file;
-        self.black_to_move = !self.black_to_move;
+            // Restore metadata
+            position.castling_rights = castling_rights;
+            position.reversible_moves = reversible_moves;
+            position.en_passant_file = en_passant_file;
+            position.black_to_move = BLACK_TO_MOVE;
 
-        // Unmake the move
-        let move_bitboard = origin.bitboard() | target.bitboard();
-        unsafe {
-            *self.pieces.get_unchecked_mut(origin as usize) =
-                self.pieces.get_unchecked_mut(target as usize).take()
-        };
-        let Some(moving_kind) = self.pieces[origin as usize] else {
-            unsafe { unreachable_unchecked() }
-        };
-        self.color_bitboards[self.black_to_move as usize] ^= move_bitboard;
-        self.piece_bitboards[moving_kind as usize] ^= move_bitboard;
-        self.occupancy_bitboard ^= move_bitboard;
+            // Unmake the move
+            let origin = played.origin();
+            let target = played.target();
+            let move_bitboard = origin.bitboard() | target.bitboard();
+            unsafe {
+                *position.pieces.get_unchecked_mut(origin as usize) =
+                    position.pieces.get_unchecked_mut(target as usize).take()
+            };
+            let Some(moving_kind) = position.pieces[origin as usize] else {
+                unreachable_unchecked()
+            };
+            *position.color_bitboards.get_unchecked_mut(us_index) ^= move_bitboard;
+            *position
+                .piece_bitboards
+                .get_unchecked_mut(moving_kind as usize) ^= move_bitboard;
+            position.occupancy_bitboard ^= move_bitboard;
 
-        // And deal with move kind specifics
-        match kind {
-            MoveKind::Castle(castle_kind) => {
-                let (rook_origin, rook_target) = if castle_kind == CastleKind::QueenSide {
-                    Self::QUEENSIDE_ROOK_MOVES[self.black_to_move as usize]
+            // And deal with move kind specifics
+            if let Some(to) = played.is_promotion() {
+                *position
+                    .piece_bitboards
+                    .get_unchecked_mut(PieceKind::Pawn as usize) ^= origin.bitboard();
+                *position.piece_bitboards.get_unchecked_mut(to as usize) ^= origin.bitboard();
+                *position.pieces.get_unchecked_mut(origin as usize) = Some(PieceKind::Pawn);
+
+                if played.is_capture() {
+                    let Some(captured) = captured else {
+                        unreachable_unchecked()
+                    };
+                    *position.color_bitboards.get_unchecked_mut(them_index) ^= target.bitboard();
+                    *position
+                        .piece_bitboards
+                        .get_unchecked_mut(captured as usize) ^= target.bitboard();
+                    position.occupancy_bitboard ^= target.bitboard();
+                    *position.pieces.get_unchecked_mut(target as usize) = Some(captured);
+                }
+            } else if played.is_capture() {
+                let target = if played.special_0_is_set() {
+                    unsafe {
+                        target.translate_unchecked(if BLACK_TO_MOVE {
+                            Delta::North
+                        } else {
+                            Delta::South
+                        })
+                    }
                 } else {
-                    Self::KINGSIDE_ROOK_MOVES[self.black_to_move as usize]
+                    target
+                };
+                let captured = captured.unwrap_or(PieceKind::Pawn);
+                *position.color_bitboards.get_unchecked_mut(them_index) ^= target.bitboard();
+                *position
+                    .piece_bitboards
+                    .get_unchecked_mut(captured as usize) ^= target.bitboard();
+                position.occupancy_bitboard ^= target.bitboard();
+                *position.pieces.get_unchecked_mut(target as usize) = Some(captured);
+            } else if played.special_1_is_set() {
+                let (rook_origin, rook_target) = if played.special_0_is_set() {
+                    if BLACK_TO_MOVE {
+                        (Square::A8, Square::D8)
+                    } else {
+                        (Square::A1, Square::D1)
+                    }
+                } else if BLACK_TO_MOVE {
+                    (Square::H8, Square::F8)
+                } else {
+                    (Square::H1, Square::F1)
                 };
                 let rook_move = rook_origin.bitboard() | rook_target.bitboard();
-                self.piece_bitboards[PieceKind::Rook as usize] ^= rook_move;
-                self.color_bitboards[self.black_to_move as usize] ^= rook_move;
-                self.occupancy_bitboard ^= rook_move;
+                *position
+                    .piece_bitboards
+                    .get_unchecked_mut(PieceKind::Rook as usize) ^= rook_move;
+                *position.color_bitboards.get_unchecked_mut(us_index) ^= rook_move;
+                position.occupancy_bitboard ^= rook_move;
                 unsafe {
-                    *self.pieces.get_unchecked_mut(rook_origin as usize) =
-                        self.pieces.get_unchecked_mut(rook_target as usize).take()
+                    *position.pieces.get_unchecked_mut(rook_origin as usize) = position
+                        .pieces
+                        .get_unchecked_mut(rook_target as usize)
+                        .take()
                 };
             }
-            MoveKind::Capture => {
-                let Some(captured) = captured else {
-                    unsafe { unreachable_unchecked() }
-                };
-                self.color_bitboards[!self.black_to_move as usize] ^= target.bitboard();
-                self.piece_bitboards[captured as usize] ^= target.bitboard();
-                self.occupancy_bitboard ^= target.bitboard();
-                self.pieces[target as usize] = Some(captured);
-            }
-            MoveKind::EnPassantCapture => {
-                let captured_square = unsafe {
-                    target.translate_unchecked(if self.black_to_move {
-                        Delta::North
-                    } else {
-                        Delta::South
-                    })
-                };
-                self.color_bitboards[!self.black_to_move as usize] ^= captured_square.bitboard();
-                self.piece_bitboards[PieceKind::Pawn as usize] ^= captured_square.bitboard();
-                self.occupancy_bitboard ^= captured_square.bitboard();
-                self.pieces[captured_square as usize] = Some(PieceKind::Pawn);
-            }
-            MoveKind::Promotion(to) => {
-                self.piece_bitboards[PieceKind::Pawn as usize] ^= origin.bitboard();
-                self.piece_bitboards[to as usize] ^= origin.bitboard();
-                self.pieces[origin as usize] = Some(PieceKind::Pawn)
-            }
-            MoveKind::PromotionCapture(to) => {
-                self.piece_bitboards[PieceKind::Pawn as usize] ^= origin.bitboard();
-                self.piece_bitboards[to as usize] ^= origin.bitboard();
-                self.pieces[origin as usize] = Some(PieceKind::Pawn);
+        }
 
-                let Some(captured) = captured else {
-                    unsafe { unreachable_unchecked() }
-                };
-                self.color_bitboards[!self.black_to_move as usize] ^= target.bitboard();
-                self.piece_bitboards[captured as usize] ^= target.bitboard();
-                self.occupancy_bitboard ^= target.bitboard();
-                self.pieces[target as usize] = Some(captured);
+        if let Some(history_entry) = self.history.pop() {
+            unsafe {
+                if self.black_to_move {
+                    unmake_generic::<false>(self, history_entry)
+                } else {
+                    unmake_generic::<true>(self, history_entry)
+                }
             }
-            _ => {}
         }
     }
 
     /// Generates a list of legal moves in the current position.
     ///
     /// If this function returns an empty list, the side to move is in checkmate.
-    pub fn moves(&self) -> ArrayVec<Move, 256> {
-        let mut moves = ArrayVec::new();
+    pub fn moves(&self) -> ArrayVec<LegalMove, 256> {
+        #[inline(always)]
+        unsafe fn moves_generic<const BLACK_TO_MOVE: bool>(
+            position: &Position,
+        ) -> ArrayVec<LegalMove, 256> {
+            let mut moves = ArrayVec::new();
 
-        // Initialize some generally useful constants.
-        let mut us = self.color_bitboards[self.black_to_move as usize];
-        let them = self.color_bitboards[!self.black_to_move as usize];
-        let king = self.piece_bitboards[PieceKind::King as usize] & us;
-        let king_square = unsafe { king.lowest_set_square_unchecked() };
+            // Initialize some generally useful constants.
+            let us_index = BLACK_TO_MOVE as usize;
+            let them_index = !BLACK_TO_MOVE as usize;
 
-        // Test for pins and attacks.
-        // We generate moves for pinned pieces directly when detecting them. Those
-        // pieces are masked from bitboards afterwards.
+            let mut us = position.color_bitboards[us_index];
+            let them = position.color_bitboards[them_index];
 
-        // If we find a direct attack to the king, we can now ignore pinned pieces
-        // since their moves are known to be illegal.
-
-        // Represents the checkers, or squares containing opponent pieces if none is found.
-        let mut capturable = Bitboard::empty();
-        // Represents the check rays, empty squares otherwise.
-        let mut movable = Bitboard::empty();
-        // Squares attacked by enemy pieces.
-        let mut attacked = Bitboard::empty();
-
-        // First, fill the `attacked` board with info from direct contact pieces.
-        // Those pieces do not generate rays and thus cannot be blocked or create pins.
-        let (_, east, west) = Delta::pawn_deltas(!self.black_to_move);
-        let ennemy_pawns = self.piece_bitboards[PieceKind::Pawn as usize] & them;
-        attacked |= ((ennemy_pawns & !File::H.bitboard()) + east)
-            | ((ennemy_pawns & !File::A.bitboard()) + west);
-
-        let ennemy_knights = self.piece_bitboards[PieceKind::Knight as usize] & them;
-        for origin in ennemy_knights {
-            attacked |= Self::knight_moves(origin)
-        }
-
-        // If any of those attacked squares intersects with our king, we find the checkers
-        // and add them to the `capturable` set.
-        if (king & attacked).is_not_empty() {
-            capturable |= Self::knight_moves(king_square) & ennemy_knights;
-            let (_, east, west) = Delta::pawn_deltas(self.black_to_move);
-            capturable |= (((king & !File::H.bitboard()) + east)
-                | ((king & !File::A.bitboard()) + west))
-                & ennemy_pawns;
-        }
-
-        // The enemy king cannot check us legally,
-        // but we still need to compute the squares it attacks.
-        let ennemy_king = unsafe {
-            (self.piece_bitboards[PieceKind::King as usize] & them).lowest_set_square_unchecked()
-        };
-        attacked |= Self::king_moves(ennemy_king);
-
-        // We then deal with ray attacks. These can produce pins and are blockable.
-        // For each sliding piece, we generate its moves and then check for two scenarios:
-        // - either the piece directly attacks our king, we're in check and add the slider to the `capturable` set.
-        // - or the piece can attack our king when xraying our pieces. In this case, the slider might create a pin.
-        let ennemy_queens = self.piece_bitboards[PieceKind::Queen as usize] & them;
-        let ennemy_bishops = self.piece_bitboards[PieceKind::Bishop as usize] & them;
-        let ennemy_diagonals = ennemy_queens | ennemy_bishops;
-
-        let king_diagonal_rays = Self::diagonal_moves(king_square, them);
-
-        for origin in ennemy_diagonals {
-            let attack = Self::diagonal_moves(origin, self.occupancy_bitboard ^ king);
-            attacked |= attack;
-
-            // This piece is checking our king, add it to the checkers and add the
-            // ray to the movable squares.
-            if attack.intersects(king) {
-                capturable |= origin.bitboard();
-                movable |=
-                    Self::diagonal_moves(origin, self.occupancy_bitboard) & king_diagonal_rays;
-            }
-            // This piece is accessible by our king when ignoring our own pieces, so it
-            // might create a pin. This is checked by counting the number of our own pieces
-            // intersected by the ray.
-            else if king_diagonal_rays.is_set(origin) {
-                let ray = Self::diagonal_moves(origin, king) & king_diagonal_rays;
-                let pinned = ray & us;
-                if pinned.has_more_than_one() {
-                    continue;
-                }
-                let ray = ray ^ pinned;
-                let pinned_square = unsafe { pinned.lowest_set_square_unchecked() };
-
-                // Remove the pinned piece from normal move generation
-                us ^= pinned;
-
-                // Then generate its moves (if any) if we're not already in check.
-                if capturable.is_empty() {
-                    // If the pinned piece is a corresponding slider, move it along the
-                    // ray and generate a capture
-                    if ((self.piece_bitboards[PieceKind::Bishop as usize]
-                        | self.piece_bitboards[PieceKind::Queen as usize])
-                        & pinned)
-                        .is_not_empty()
-                    {
-                        for target in ray {
-                            moves.push(Move {
-                                origin: pinned_square,
-                                target,
-                                kind: MoveKind::Quiet,
-                            })
-                        }
-                        moves.push(Move {
-                            origin: pinned_square,
-                            target: origin,
-                            kind: MoveKind::Capture,
-                        })
-                    }
-                    // If the pinned piece is a pawn, it can only capture the piece directly
-                    // or capture en passant. Note that captures can be promotions.
-                    else if (self.piece_bitboards[PieceKind::Pawn as usize] & pinned)
-                        .is_not_empty()
-                    {
-                        let (_, east, west) = Delta::pawn_deltas(self.black_to_move);
-                        if ((pinned & !File::H.bitboard()) + east).is_set(origin)
-                            || ((pinned & !File::A.bitboard()) + west).is_set(origin)
-                        {
-                            // Promotion capture
-                            if (pinned
-                                & if self.black_to_move {
-                                    Rank::Two.bitboard()
-                                } else {
-                                    Rank::Seven.bitboard()
-                                })
-                            .is_not_empty()
-                            {
-                                for kind in [
-                                    PieceKind::Knight,
-                                    PieceKind::Bishop,
-                                    PieceKind::Rook,
-                                    PieceKind::Queen,
-                                ] {
-                                    moves.push(Move {
-                                        origin: pinned_square,
-                                        target: origin,
-                                        kind: MoveKind::PromotionCapture(kind),
-                                    })
-                                }
-                            } else {
-                                moves.push(Move {
-                                    origin: pinned_square,
-                                    target: origin,
-                                    kind: MoveKind::Capture,
-                                })
-                            }
-                        }
-
-                        // En passant captures are hell.
-                        // We first check if the target is on the pin ray.
-                        // If it is, we then check if the pawn to be captured
-                        // doesn't discover a check
-                        if let Some(file) = self.en_passant_file {
-                            // TODO
-                        }
-                    }
-                }
-            }
-        }
-
-        // Repeat for orthogonal sliders
-        let ennemy_rooks = self.piece_bitboards[PieceKind::Rook as usize] & them;
-        let ennemy_orthogonals = ennemy_rooks | ennemy_queens;
-
-        let king_orthogonal_rays = Self::orthogonal_moves(king_square, them);
-
-        for origin in ennemy_orthogonals {
-            let attack = Self::orthogonal_moves(origin, self.occupancy_bitboard ^ king);
-            attacked |= attack;
-
-            // This piece is checking our king, add it to the checkers and add the
-            // ray to the movable squares.
-            if attack.intersects(king) {
-                capturable |= origin.bitboard();
-                movable |=
-                    king_orthogonal_rays & Self::orthogonal_moves(origin, self.occupancy_bitboard);
-            }
-            // This piece is accessible by our king when ignoring our own pieces, so it
-            // might create a pin. This is checked by counting the number of our own pieces
-            // intersected by the ray.
-            else if king_orthogonal_rays.is_set(origin) {
-                let ray = Self::orthogonal_moves(origin, king) & king_orthogonal_rays;
-                let pinned = ray & us;
-                if pinned.has_more_than_one() {
-                    continue;
-                }
-                let ray = ray ^ pinned;
-                let pinned_square = unsafe { pinned.lowest_set_square_unchecked() };
-
-                // Remove the pinned piece from normal move generation
-                us ^= pinned;
-
-                // Then generate its moves (if any) if we're not already in check.
-                if capturable.is_empty() {
-                    // If the pinned piece is a corresponding slider, move it along the
-                    // ray and generate a capture
-                    if ((self.piece_bitboards[PieceKind::Rook as usize]
-                        | self.piece_bitboards[PieceKind::Queen as usize])
-                        & pinned)
-                        .is_not_empty()
-                    {
-                        for target in ray {
-                            moves.push(Move {
-                                origin: pinned_square,
-                                target,
-                                kind: MoveKind::Quiet,
-                            })
-                        }
-                        moves.push(Move {
-                            origin: pinned_square,
-                            target: origin,
-                            kind: MoveKind::Capture,
-                        })
-                    }
-                    // If the pinned piece is a pawn, it can only push or double push
-                    // if its on its original square.
-                    else if (self.piece_bitboards[PieceKind::Pawn as usize] & pinned)
-                        .is_not_empty()
-                    {
-                        let (push, _, _) = Delta::pawn_deltas(self.black_to_move);
-                        let single_push = pinned + push;
-                        if let Some(target) = (single_push & ray).next() {
-                            moves.push(Move {
-                                origin: pinned_square,
-                                target,
-                                kind: MoveKind::Quiet,
-                            });
-                            if let Some(target) = (((single_push
-                                & if self.black_to_move {
-                                    Rank::Six.bitboard()
-                                } else {
-                                    Rank::Three.bitboard()
-                                })
-                                + push)
-                                & ray)
-                                .next()
-                            {
-                                moves.push(Move {
-                                    origin: pinned_square,
-                                    target,
-                                    kind: MoveKind::DoublePush,
-                                })
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Decide what to do based on the number of checkers.
-        // If more than one checker, no moves other than the king's are legal.
-        // Otherwise, we generate moves as we generally do.
-        if capturable.has_at_most_one() {
-            if capturable.is_empty() {
-                // If no checker: generate castling moves and restore capturable and movable masks
-                // to the opponent and empty squares respectively.
-                capturable = them;
-                movable = !self.occupancy_bitboard;
-
-                const QUEENSIDE_ATTACK_MASK: [Bitboard; 2] =
-                    [Bitboard(0xc), Bitboard(0xc00000000000000)];
-                if self.queenside_castle_allowed(self.black_to_move)
-                    && !attacked.intersects(QUEENSIDE_ATTACK_MASK[self.black_to_move as usize])
-                {
-                    moves.push(Move {
-                        origin: king_square,
-                        target: king_square + Delta::West + Delta::West,
-                        kind: MoveKind::Castle(CastleKind::QueenSide),
-                    })
-                }
-                const KINGSIDE_ATTACK_MASK: [Bitboard; 2] =
-                    [Bitboard(0x60), Bitboard(0x6000000000000000)];
-                if self.kingside_castle_allowed(self.black_to_move)
-                    && !attacked.intersects(KINGSIDE_ATTACK_MASK[self.black_to_move as usize])
-                {
-                    moves.push(Move {
-                        origin: king_square,
-                        target: king_square + Delta::East + Delta::East,
-                        kind: MoveKind::Castle(CastleKind::KingSide),
-                    })
-                }
+            let (
+                pawn_push,
+                pawn_east_attack,
+                pawn_west_attack,
+                promotion_rank,
+                en_passant_rank,
+                double_push_rank,
+            ) = if BLACK_TO_MOVE {
+                (
+                    Delta::South,
+                    Delta::SouthEast,
+                    Delta::SouthWest,
+                    Rank::Two.bitboard(),
+                    Rank::Three.bitboard(),
+                    Rank::Six.bitboard(),
+                )
             } else {
-                // Otherwise, clear pinned piece moves that might have been generated
-                // before going forward
-                moves.clear()
+                (
+                    Delta::North,
+                    Delta::NorthEast,
+                    Delta::NorthWest,
+                    Rank::Seven.bitboard(),
+                    Rank::Six.bitboard(),
+                    Rank::Three.bitboard(),
+                )
+            };
+
+            let king = position.piece_bitboards[PieceKind::King as usize] & us;
+            let king_square = king.lowest_set_square_unchecked();
+
+            // Test for pins and attacks.
+            // We generate moves for pinned pieces directly when detecting them. Those
+            // pieces are masked from bitboards afterwards.
+
+            // If we find a direct attack to the king, we can now ignore pinned pieces
+            // since their moves are known to be illegal.
+
+            // Represents the checkers, or squares containing opponent pieces if none is found.
+            let mut capturable = Bitboard::empty();
+            // Represents the check rays, empty squares otherwise.
+            let mut movable = Bitboard::empty();
+            // Squares attacked by enemy pieces.
+            let mut attacked = Bitboard::empty();
+
+            // First, fill the `attacked` board with info from direct contact pieces.
+            // Those pieces do not generate rays and thus cannot be blocked or create pins.
+            let ennemy_pawns = position.piece_bitboards[PieceKind::Pawn as usize] & them;
+            attacked |= ((ennemy_pawns & !File::H.bitboard()) - pawn_west_attack)
+                | ((ennemy_pawns & !File::A.bitboard()) - pawn_east_attack);
+
+            let ennemy_knights = position.piece_bitboards[PieceKind::Knight as usize] & them;
+            for origin in ennemy_knights {
+                attacked |= Position::KNIGHT_MOVES[origin as usize]
             }
 
-            // Pawn moves
-            let pawns = self.piece_bitboards[PieceKind::Pawn as usize] & us;
-            let promoting_pawns = pawns
-                & if self.black_to_move {
-                    Rank::Two.bitboard()
-                } else {
-                    Rank::Seven.bitboard()
-                };
-            let pawns = pawns ^ promoting_pawns;
-            let (push, east_capture, west_capture) = Delta::pawn_deltas(self.black_to_move);
-            let single_push = (pawns + push) & !self.occupancy_bitboard;
-            let double_push = ((single_push
-                & if self.black_to_move {
-                    Rank::Six.bitboard()
-                } else {
-                    Rank::Three.bitboard()
-                })
-                + push)
-                & movable;
-            let single_push = single_push & movable;
-            let promoting_push = (promoting_pawns + push) & movable;
-
-            let east_captures = ((pawns & !File::H.bitboard()) + east_capture) & capturable;
-            let west_captures = ((pawns & !File::A.bitboard()) + west_capture) & capturable;
-
-            let promoting_east_captures =
-                ((promoting_pawns & !File::H.bitboard()) + east_capture) & capturable;
-            let promoting_west_captures =
-                ((promoting_pawns & !File::A.bitboard()) + west_capture) & capturable;
-
-            for target in single_push {
-                moves.push(Move {
-                    origin: target - push,
-                    target,
-                    kind: MoveKind::Quiet,
-                })
-            }
-            for target in double_push {
-                moves.push(Move {
-                    origin: target - push - push,
-                    target,
-                    kind: MoveKind::DoublePush,
-                })
-            }
-            for target in east_captures {
-                moves.push(Move {
-                    origin: target - east_capture,
-                    target,
-                    kind: MoveKind::Capture,
-                })
-            }
-            for target in west_captures {
-                moves.push(Move {
-                    origin: target - west_capture,
-                    target,
-                    kind: MoveKind::Capture,
-                })
+            // If any of those attacked squares intersects with our king, we find the checkers
+            // and add them to the `capturable` set.
+            if attacked.intersects(king) {
+                capturable |= Position::KNIGHT_MOVES[king_square as usize] & ennemy_knights;
+                capturable |= (((king & !File::H.bitboard()) + pawn_east_attack)
+                    | ((king & !File::A.bitboard()) + pawn_west_attack))
+                    & ennemy_pawns;
             }
 
-            for target in promoting_push {
-                for kind in [
-                    PieceKind::Knight,
-                    PieceKind::Bishop,
-                    PieceKind::Rook,
-                    PieceKind::Queen,
-                ] {
-                    moves.push(Move {
-                        origin: target - push,
-                        target,
-                        kind: MoveKind::Promotion(kind),
-                    })
+            // The enemy king cannot check us legally,
+            // but we still need to compute the squares it attacks.
+            let ennemy_king = (position.piece_bitboards[PieceKind::King as usize] & them)
+                .lowest_set_square_unchecked();
+            attacked |= Position::KING_MOVES[ennemy_king as usize];
+
+            // We then deal with ray attacks. These can produce pins and are blockable.
+            // For each sliding piece, we generate its moves and then check for two scenarios:
+            // - either the piece directly attacks our king, we're in check and add the slider to the `capturable` set.
+            // - or the piece can attack our king when xraying our pieces. In this case, the slider might create a pin.
+            let ennemy_queens = position.piece_bitboards[PieceKind::Queen as usize] & them;
+            let ennemy_bishops = position.piece_bitboards[PieceKind::Bishop as usize] & them;
+            let ennemy_diagonals = ennemy_queens | ennemy_bishops;
+
+            let king_diagonal_rays = Position::diagonal_moves(king_square, them);
+            let non_king = position.occupancy_bitboard ^ king;
+
+            for origin in ennemy_diagonals {
+                let attack = Position::diagonal_moves(origin, non_king);
+                attacked |= attack;
+
+                // This piece is checking our king, add it to the checkers and add the
+                // ray to the movable squares.
+                if attack.intersects(king) {
+                    capturable |= origin.bitboard();
+                    movable |= Position::diagonal_moves(origin, position.occupancy_bitboard)
+                        & king_diagonal_rays;
                 }
-            }
-            for target in promoting_east_captures {
-                for kind in [
-                    PieceKind::Knight,
-                    PieceKind::Bishop,
-                    PieceKind::Rook,
-                    PieceKind::Queen,
-                ] {
-                    moves.push(Move {
-                        origin: target - east_capture,
-                        target,
-                        kind: MoveKind::PromotionCapture(kind),
-                    })
-                }
-            }
-            for target in promoting_west_captures {
-                for kind in [
-                    PieceKind::Knight,
-                    PieceKind::Bishop,
-                    PieceKind::Rook,
-                    PieceKind::Queen,
-                ] {
-                    moves.push(Move {
-                        origin: target - west_capture,
-                        target,
-                        kind: MoveKind::PromotionCapture(kind),
-                    })
-                }
-            }
-
-            // En passant is a bit tricky as it can leave the king in check.
-            // Those moves are rare enough that we can check carefully for illegal
-            // en passant capture without caring too much about the cost.
-            if let Some(file) = self.en_passant_file {
-                let capture_rank = if self.black_to_move {
-                    Rank::Four.bitboard()
-                } else {
-                    Rank::Five.bitboard()
-                };
-                let captured = file.bitboard() & capture_rank;
-                let target = unsafe {
-                    (file.bitboard()
-                        & if self.black_to_move {
-                            Rank::Three.bitboard()
-                        } else {
-                            Rank::Six.bitboard()
-                        })
-                    .lowest_set_square_unchecked()
-                };
-
-                if captured.intersects(capturable) || movable.is_set(target) {
-                    let east_attacker = ((captured & !File::H.bitboard()) + Delta::East) & pawns;
-                    let west_attacker = ((captured & !File::A.bitboard()) + Delta::West) & pawns;
-
-                    // Check if the king could be attacked if the attacked and attacker
-                    // left the board
-                    if !(Self::orthogonal_moves(
-                        king_square,
-                        self.occupancy_bitboard & !captured & !east_attacker,
-                    ) & capture_rank)
-                        .intersects(ennemy_orthogonals)
-                        && !Self::diagonal_moves(king_square, self.occupancy_bitboard & !captured)
-                            .intersects(ennemy_diagonals)
-                    {
-                        if let Some(origin) = east_attacker.lowest_set_square() {
-                            moves.push(Move {
-                                origin,
-                                target,
-                                kind: MoveKind::EnPassantCapture,
-                            })
-                        }
+                // This piece is accessible by our king when ignoring our own pieces, so it
+                // might create a pin. This is checked by counting the number of our own pieces
+                // intersected by the ray.
+                else if king_diagonal_rays.is_set(origin) {
+                    let ray = Position::diagonal_moves(origin, king) & king_diagonal_rays;
+                    let pinned = ray & us;
+                    if pinned.has_more_than_one() {
+                        continue;
                     }
-                    // Same for west attacks
-                    if !(Self::orthogonal_moves(
-                        king_square,
-                        self.occupancy_bitboard & !captured & !west_attacker,
-                    ) & capture_rank)
-                        .intersects(ennemy_orthogonals)
-                        && !Self::diagonal_moves(king_square, self.occupancy_bitboard & !captured)
-                            .intersects(ennemy_diagonals)
-                    {
-                        if let Some(origin) = west_attacker.lowest_set_square() {
-                            moves.push(Move {
-                                origin,
-                                target,
-                                kind: MoveKind::EnPassantCapture,
-                            })
+                    let ray = ray ^ pinned;
+                    let pinned_square = pinned.lowest_set_square_unchecked();
+
+                    // Remove the pinned piece from normal move generation
+                    us ^= pinned;
+
+                    // Then generate its moves (if any) if we're not already in check.
+                    if capturable.is_empty() {
+                        // If the pinned piece is a corresponding slider, move it along the
+                        // ray and generate a capture
+                        if (position.piece_bitboards[PieceKind::Bishop as usize]
+                            | position.piece_bitboards[PieceKind::Queen as usize])
+                            .intersects(pinned)
+                        {
+                            for target in ray {
+                                moves.push_unchecked(LegalMove::new_quiet(pinned_square, target))
+                            }
+                            moves.push_unchecked(LegalMove::new_capture(pinned_square, origin))
+                        }
+                        // If the pinned piece is a pawn, it can only capture the piece directly
+                        // or capture en passant. Note that captures can be promotions.
+                        else if position.piece_bitboards[PieceKind::Pawn as usize]
+                            .intersects(pinned)
+                        {
+                            if ((pinned & !File::H.bitboard()) + pawn_east_attack).is_set(origin)
+                                || ((pinned & !File::A.bitboard()) + pawn_west_attack)
+                                    .is_set(origin)
+                            {
+                                // Promotion capture
+                                if pinned.intersects(promotion_rank) {
+                                    moves
+                                        .try_extend_from_slice(&LegalMove::new_promotion_capture(
+                                            pinned_square,
+                                            origin,
+                                        ))
+                                        .unwrap_unchecked();
+                                } else {
+                                    moves.push_unchecked(LegalMove::new_capture(
+                                        pinned_square,
+                                        origin,
+                                    ))
+                                }
+                            }
+
+                            // En passant captures are hell.
+                            // We first check if the target is on the pin ray.
+                            // If it is, we then check if the pawn to be captured
+                            // doesn't discover a check
+                            if let Some(_file) = position.en_passant_file {
+                                // TODO
+                            }
                         }
                     }
                 }
             }
 
-            // Knight moves
-            let knights = self.piece_bitboards[PieceKind::Knight as usize] & us;
-            for origin in knights {
-                let knight_moves = Self::knight_moves(origin);
-                for target in knight_moves & movable {
-                    moves.push(Move {
-                        origin,
-                        target,
-                        kind: MoveKind::Quiet,
-                    })
+            // Repeat for orthogonal sliders
+            let ennemy_rooks = position.piece_bitboards[PieceKind::Rook as usize] & them;
+            let ennemy_orthogonals = ennemy_rooks | ennemy_queens;
+
+            let king_orthogonal_rays = Position::orthogonal_moves(king_square, them);
+
+            for origin in ennemy_orthogonals {
+                let attack = Position::orthogonal_moves(origin, non_king);
+                attacked |= attack;
+
+                // This piece is checking our king, add it to the checkers and add the
+                // ray to the movable squares.
+                if attack.intersects(king) {
+                    capturable |= origin.bitboard();
+                    movable |= king_orthogonal_rays
+                        & Position::orthogonal_moves(origin, position.occupancy_bitboard);
                 }
-                for target in knight_moves & capturable {
-                    moves.push(Move {
-                        origin,
-                        target,
-                        kind: MoveKind::Capture,
-                    })
+                // This piece is accessible by our king when ignoring our own pieces, so it
+                // might create a pin. This is checked by counting the number of our own pieces
+                // intersected by the ray.
+                else if king_orthogonal_rays.is_set(origin) {
+                    let ray = Position::orthogonal_moves(origin, king) & king_orthogonal_rays;
+                    let pinned = ray & us;
+                    if pinned.has_more_than_one() {
+                        continue;
+                    }
+                    let ray = ray ^ pinned;
+                    let pinned_square = pinned.lowest_set_square_unchecked();
+
+                    // Remove the pinned piece from normal move generation
+                    us ^= pinned;
+
+                    // Then generate its moves (if any) if we're not already in check.
+                    if capturable.is_empty() {
+                        // If the pinned piece is a corresponding slider, move it along the
+                        // ray and generate a capture
+                        if (position.piece_bitboards[PieceKind::Rook as usize]
+                            | position.piece_bitboards[PieceKind::Queen as usize])
+                            .intersects(pinned)
+                        {
+                            for target in ray {
+                                moves.push_unchecked(LegalMove::new_quiet(pinned_square, target))
+                            }
+                            moves.push_unchecked(LegalMove::new_capture(pinned_square, origin))
+                        }
+                        // If the pinned piece is a pawn, it can only push or double push
+                        // if its on its original square.
+                        else if position.piece_bitboards[PieceKind::Pawn as usize]
+                            .intersects(pinned)
+                        {
+                            let single_push = pinned + pawn_push;
+                            if let Some(target) = (single_push & ray).next() {
+                                moves.push(LegalMove::new_quiet(pinned_square, target));
+                                if let Some(target) =
+                                    (((single_push & double_push_rank) + pawn_push) & ray)
+                                        .lowest_set_square()
+                                {
+                                    moves.push_unchecked(LegalMove::new_double_push(
+                                        pinned_square,
+                                        target,
+                                    ))
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            // Sliding pieces
-            for origin in (self.piece_bitboards[PieceKind::Bishop as usize]
-                | self.piece_bitboards[PieceKind::Queen as usize])
-                & us
-            {
-                let diagonal_moves = Self::diagonal_moves(origin, self.occupancy_bitboard);
-                for target in diagonal_moves & movable {
-                    moves.push(Move {
-                        origin,
-                        target,
-                        kind: MoveKind::Quiet,
-                    })
+            // Decide what to do based on the number of checkers.
+            // If more than one checker, no moves other than the king's are legal.
+            // Otherwise, we generate moves as we generally do.
+            if capturable.has_at_most_one() {
+                if capturable.is_empty() {
+                    // If no checker: generate castling moves and restore capturable and movable masks
+                    // to the opponent and empty squares respectively.
+                    capturable = them;
+                    movable = !position.occupancy_bitboard;
+
+                    if position.queenside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
+                        moves.push_unchecked(LegalMove::new_queenside_castle::<BLACK_TO_MOVE>())
+                    }
+                    if position.kingside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
+                        moves.push_unchecked(LegalMove::new_kingside_castle::<BLACK_TO_MOVE>())
+                    }
+                } else {
+                    // Otherwise, clear pinned piece moves that might have been generated
+                    // before going forward
+                    moves.clear()
                 }
-                for target in diagonal_moves & capturable {
-                    moves.push(Move {
-                        origin,
+
+                // Pawn moves
+                let pawns = position.piece_bitboards[PieceKind::Pawn as usize] & us;
+                let promoting_pawns = pawns & promotion_rank;
+                let pawns = pawns ^ promoting_pawns;
+
+                let single_push = (pawns + pawn_push) & !position.occupancy_bitboard;
+                let double_push = ((single_push & double_push_rank) + pawn_push) & movable;
+                for target in double_push {
+                    moves.push_unchecked(LegalMove::new_double_push(
+                        target - pawn_push - pawn_push,
                         target,
-                        kind: MoveKind::Capture,
-                    })
+                    ))
+                }
+
+                for target in single_push & movable {
+                    moves.push_unchecked(LegalMove::new_quiet(target - pawn_push, target))
+                }
+
+                let east_captures = ((pawns & !File::H.bitboard()) + pawn_east_attack) & capturable;
+                for target in east_captures {
+                    moves.push_unchecked(LegalMove::new_capture(target - pawn_east_attack, target))
+                }
+                let west_captures = ((pawns & !File::A.bitboard()) + pawn_west_attack) & capturable;
+                for target in west_captures {
+                    moves.push_unchecked(LegalMove::new_capture(target - pawn_west_attack, target))
+                }
+
+                let promoting_push = (promoting_pawns + pawn_push) & movable;
+                for target in promoting_push {
+                    moves
+                        .try_extend_from_slice(&LegalMove::new_promotion(
+                            target - pawn_push,
+                            target,
+                        ))
+                        .unwrap_unchecked()
+                }
+                let promoting_east_captures =
+                    ((promoting_pawns & !File::H.bitboard()) + pawn_east_attack) & capturable;
+                for target in promoting_east_captures {
+                    moves
+                        .try_extend_from_slice(&LegalMove::new_promotion_capture(
+                            target - pawn_east_attack,
+                            target,
+                        ))
+                        .unwrap_unchecked()
+                }
+                let promoting_west_captures =
+                    ((promoting_pawns & !File::A.bitboard()) + pawn_west_attack) & capturable;
+                for target in promoting_west_captures {
+                    moves
+                        .try_extend_from_slice(&LegalMove::new_promotion_capture(
+                            target - pawn_west_attack,
+                            target,
+                        ))
+                        .unwrap_unchecked()
+                }
+
+                // En passant is a bit tricky as it can leave the king in check.
+                // Those moves are rare enough that we can check carefully for illegal
+                // en passant capture without caring too much about the cost.
+                if let Some(file) = position.en_passant_file {
+                    let capture_rank = if BLACK_TO_MOVE {
+                        Rank::Four.bitboard()
+                    } else {
+                        Rank::Five.bitboard()
+                    };
+                    let captured = file.bitboard() & capture_rank;
+                    let target = (file.bitboard() & en_passant_rank).lowest_set_square_unchecked();
+
+                    if captured.intersects(capturable) || movable.is_set(target) {
+                        let east_attacker =
+                            ((captured & !File::H.bitboard()) + Delta::East) & pawns;
+                        let west_attacker =
+                            ((captured & !File::A.bitboard()) + Delta::West) & pawns;
+
+                        // Check if the king could be attacked if the attacked and attacker
+                        // left the board
+                        if !(Position::orthogonal_moves(
+                            king_square,
+                            position.occupancy_bitboard & !captured & !east_attacker,
+                        ) & capture_rank)
+                            .intersects(ennemy_orthogonals)
+                            && !Position::diagonal_moves(
+                                king_square,
+                                position.occupancy_bitboard & !captured,
+                            )
+                            .intersects(ennemy_diagonals)
+                        {
+                            if let Some(origin) = east_attacker.lowest_set_square() {
+                                moves.push_unchecked(LegalMove::new_en_passant(origin, target))
+                            }
+                        }
+                        // Same for west attacks
+                        if !(Position::orthogonal_moves(
+                            king_square,
+                            position.occupancy_bitboard & !captured & !west_attacker,
+                        ) & capture_rank)
+                            .intersects(ennemy_orthogonals)
+                            && !Position::diagonal_moves(
+                                king_square,
+                                position.occupancy_bitboard & !captured,
+                            )
+                            .intersects(ennemy_diagonals)
+                        {
+                            if let Some(origin) = west_attacker.lowest_set_square() {
+                                moves.push_unchecked(LegalMove::new_en_passant(origin, target))
+                            }
+                        }
+                    }
+                }
+
+                // Knight moves
+                let knights = position.piece_bitboards[PieceKind::Knight as usize] & us;
+                for origin in knights {
+                    let knight_moves = Position::KNIGHT_MOVES[origin as usize];
+                    for target in knight_moves & movable {
+                        moves.push_unchecked(LegalMove::new_quiet(origin, target))
+                    }
+
+                    for target in knight_moves & capturable {
+                        moves.push_unchecked(LegalMove::new_capture(origin, target))
+                    }
+                }
+
+                // Sliding pieces
+                let diagonal_sliders = (position.piece_bitboards[PieceKind::Bishop as usize]
+                    | position.piece_bitboards[PieceKind::Queen as usize])
+                    & us;
+                for origin in diagonal_sliders {
+                    let diagonal_moves =
+                        Position::diagonal_moves(origin, position.occupancy_bitboard);
+                    for target in diagonal_moves & movable {
+                        moves.push_unchecked(LegalMove::new_quiet(origin, target))
+                    }
+
+                    for target in diagonal_moves & capturable {
+                        moves.push_unchecked(LegalMove::new_capture(origin, target))
+                    }
+                }
+
+                let orthogonal_sliders = (position.piece_bitboards[PieceKind::Rook as usize]
+                    | position.piece_bitboards[PieceKind::Queen as usize])
+                    & us;
+                for origin in orthogonal_sliders {
+                    let diagonal_moves =
+                        Position::orthogonal_moves(origin, position.occupancy_bitboard);
+                    for target in diagonal_moves & movable {
+                        moves.push_unchecked(LegalMove::new_quiet(origin, target))
+                    }
+
+                    for target in diagonal_moves & capturable {
+                        moves.push_unchecked(LegalMove::new_capture(origin, target))
+                    }
                 }
             }
-            for origin in (self.piece_bitboards[PieceKind::Rook as usize]
-                | self.piece_bitboards[PieceKind::Queen as usize])
-                & us
-            {
-                let orthogonal_moves = Self::orthogonal_moves(origin, self.occupancy_bitboard);
-                for target in orthogonal_moves & movable {
-                    moves.push(Move {
-                        origin,
-                        target,
-                        kind: MoveKind::Quiet,
-                    })
-                }
-                for target in orthogonal_moves & capturable {
-                    moves.push(Move {
-                        origin,
-                        target,
-                        kind: MoveKind::Capture,
-                    })
-                }
+
+            // We always generate king moves.
+            let king_moves = Position::KING_MOVES[king_square as usize] & !attacked;
+            for target in king_moves & !position.occupancy_bitboard {
+                moves.push_unchecked(LegalMove::new_quiet(king_square, target));
+            }
+            for target in king_moves & them {
+                moves.push_unchecked(LegalMove::new_capture(king_square, target));
+            }
+
+            moves
+        }
+
+        unsafe {
+            if self.black_to_move {
+                moves_generic::<true>(self)
+            } else {
+                moves_generic::<false>(self)
             }
         }
-
-        // We always generate king moves.
-        let king_moves = Self::king_moves(king_square) & !attacked;
-        for target in king_moves & !self.occupancy_bitboard {
-            moves.push(Move {
-                origin: king_square,
-                target,
-                kind: MoveKind::Quiet,
-            })
-        }
-        for target in king_moves & them {
-            moves.push(Move {
-                origin: king_square,
-                target,
-                kind: MoveKind::Capture,
-            })
-        }
-
-        moves
     }
 
     /// Lookup for king moves from a given square.
-    const fn king_moves(origin: Square) -> Bitboard {
-        const KING_MOVES: [Bitboard; 64] = {
-            let mut result = [Bitboard::empty(); 64];
-            let mut origin = 0;
-            let west = File::A.bitboard().invert();
-            let east = File::H.bitboard().invert();
-            while origin < 64 {
-                let origin_bb = Bitboard(1 << origin);
-                result[origin as usize].0 |= origin_bb.intersection(west).shift(Delta::West).0
-                    | origin_bb.intersection(east).shift(Delta::East).0
-                    | origin_bb.shift(Delta::North).0
-                    | origin_bb.shift(Delta::South).0
-                    | origin_bb.intersection(east).shift(Delta::NorthEast).0
-                    | origin_bb.intersection(east).shift(Delta::SouthEast).0
-                    | origin_bb.intersection(west).shift(Delta::NorthWest).0
-                    | origin_bb.intersection(west).shift(Delta::SouthWest).0;
+    const KING_MOVES: [Bitboard; 64] = {
+        let mut result = [Bitboard::empty(); 64];
+        let mut origin = 0;
+        let west = File::A.bitboard().invert();
+        let east = File::H.bitboard().invert();
+        while origin < 64 {
+            let origin_bb = Bitboard(1 << origin);
+            result[origin as usize].0 |= origin_bb.intersection(west).shift(Delta::West).0
+                | origin_bb.intersection(east).shift(Delta::East).0
+                | origin_bb.shift(Delta::North).0
+                | origin_bb.shift(Delta::South).0
+                | origin_bb.intersection(east).shift(Delta::NorthEast).0
+                | origin_bb.intersection(east).shift(Delta::SouthEast).0
+                | origin_bb.intersection(west).shift(Delta::NorthWest).0
+                | origin_bb.intersection(west).shift(Delta::SouthWest).0;
 
-                origin += 1;
-            }
-            result
-        };
-
-        KING_MOVES[origin as usize]
-    }
+            origin += 1;
+        }
+        result
+    };
 
     /// Lookup for knight moves from a given square.
-    const fn knight_moves(origin: Square) -> Bitboard {
-        const KNIGHT_MOVES: [Bitboard; 64] = {
-            let mut result = [Bitboard::empty(); 64];
-            let mut origin = 0;
-            let west = File::A.bitboard().invert();
-            let east = File::H.bitboard().invert();
-            let two_west = File::A
-                .bitboard()
-                .invert()
-                .intersection(File::B.bitboard().invert());
-            let two_east = File::H
-                .bitboard()
-                .invert()
-                .intersection(File::G.bitboard().invert());
-            while origin < 64 {
-                let origin_bb = Bitboard(1 << origin);
-                result[origin as usize].0 |=
-                    origin_bb.intersection(east).shift(Delta::KnightNorthEast).0
-                        | origin_bb.intersection(west).shift(Delta::KnightNorthWest).0
-                        | origin_bb.intersection(east).shift(Delta::KnightSouthEast).0
-                        | origin_bb.intersection(west).shift(Delta::KnightSouthWest).0
-                        | origin_bb
-                            .intersection(two_east)
-                            .shift(Delta::KnightEastNorth)
-                            .0
-                        | origin_bb
-                            .intersection(two_west)
-                            .shift(Delta::KnightWestNorth)
-                            .0
-                        | origin_bb
-                            .intersection(two_east)
-                            .shift(Delta::KnightEastSouth)
-                            .0
-                        | origin_bb
-                            .intersection(two_west)
-                            .shift(Delta::KnightWestSouth)
-                            .0;
+    const KNIGHT_MOVES: [Bitboard; 64] = {
+        let mut result = [Bitboard::empty(); 64];
+        let mut origin = 0;
+        let west = File::A.bitboard().invert();
+        let east = File::H.bitboard().invert();
+        let two_west = File::A
+            .bitboard()
+            .invert()
+            .intersection(File::B.bitboard().invert());
+        let two_east = File::H
+            .bitboard()
+            .invert()
+            .intersection(File::G.bitboard().invert());
+        while origin < 64 {
+            let origin_bb = Bitboard(1 << origin);
+            result[origin as usize].0 |=
+                origin_bb.intersection(east).shift(Delta::KnightNorthEast).0
+                    | origin_bb.intersection(west).shift(Delta::KnightNorthWest).0
+                    | origin_bb.intersection(east).shift(Delta::KnightSouthEast).0
+                    | origin_bb.intersection(west).shift(Delta::KnightSouthWest).0
+                    | origin_bb
+                        .intersection(two_east)
+                        .shift(Delta::KnightEastNorth)
+                        .0
+                    | origin_bb
+                        .intersection(two_west)
+                        .shift(Delta::KnightWestNorth)
+                        .0
+                    | origin_bb
+                        .intersection(two_east)
+                        .shift(Delta::KnightEastSouth)
+                        .0
+                    | origin_bb
+                        .intersection(two_west)
+                        .shift(Delta::KnightWestSouth)
+                        .0;
 
-                origin += 1;
-            }
-            result
-        };
+            origin += 1;
+        }
+        result
+    };
 
-        KNIGHT_MOVES[origin as usize]
-    }
-
+    /// Returns diagonal slider moves from an origin square and given blockers.
     #[inline(always)]
     fn diagonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
         Self::SLIDER_TABLE_ENTRIES[origin as usize].get(blockers)
     }
+    /// Returns orthogonal slider moves from an origin square and given blockers.
     #[inline(always)]
     fn orthogonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
         Self::SLIDER_TABLE_ENTRIES[origin as usize + 64].get(blockers)
     }
 
-    const QUEENSIDE_RIGHT_MASK: [u8; 2] = [0b1000, 0b0010];
-    const QUEENSIDE_REMOVE_MASK: [Bitboard; 2] = [Bitboard(0x11), Bitboard(0x1100000000000000)];
-    const QUEENSIDE_OCCUPANCY_MASK: [Bitboard; 2] = [Bitboard(0xe), Bitboard(0xe00000000000000)];
-    const QUEENSIDE_ROOK_MOVES: [(Square, Square); 2] =
-        [(Square::A1, Square::D1), (Square::A8, Square::D8)];
-    pub fn queenside_castle_allowed(&self, black: bool) -> bool {
-        self.castling_rights & Self::QUEENSIDE_RIGHT_MASK[black as usize] != 0
-            && (self.occupancy_bitboard & Self::QUEENSIDE_OCCUPANCY_MASK[black as usize]).is_empty()
+    /// Checks if the side can castle queenside.
+    #[inline(always)]
+    fn queenside_castle_allowed<const BLACK_TO_MOVE: bool>(&self, attacked: Bitboard) -> bool {
+        if BLACK_TO_MOVE {
+            self.castling_rights & 0b0010 != 0
+                && !self
+                    .occupancy_bitboard
+                    .intersects(Bitboard(0xe00000000000000))
+                && !attacked.intersects(Bitboard(0xc00000000000000))
+        } else {
+            self.castling_rights & 0b1000 != 0
+                && !self.occupancy_bitboard.intersects(Bitboard(0xe))
+                && !attacked.intersects(Bitboard(0xc))
+        }
     }
-    const KINGSIDE_RIGHT_MASK: [u8; 2] = [0b0100, 0b0001];
-    const KINGSIDE_REMOVE_MASK: [Bitboard; 2] = [Bitboard(0x90), Bitboard(0x9000000000000000)];
-    const KINGSIDE_OCCUPANCY_MASK: [Bitboard; 2] = [Bitboard(0x60), Bitboard(0x6000000000000000)];
-    const KINGSIDE_ROOK_MOVES: [(Square, Square); 2] =
-        [(Square::H1, Square::F1), (Square::H8, Square::F8)];
-    pub fn kingside_castle_allowed(&self, black: bool) -> bool {
-        self.castling_rights & Self::KINGSIDE_RIGHT_MASK[black as usize] != 0
-            && (self.occupancy_bitboard & Self::KINGSIDE_OCCUPANCY_MASK[black as usize]).is_empty()
+    /// Checks if the side can castle kingside.
+    #[inline(always)]
+    fn kingside_castle_allowed<const BLACK_TO_MOVE: bool>(&self, attacked: Bitboard) -> bool {
+        if BLACK_TO_MOVE {
+            self.castling_rights & 0b0001 != 0
+                && !self
+                    .occupancy_bitboard
+                    .intersects(Bitboard(0x6000000000000000))
+                && !attacked.intersects(Bitboard(0x6000000000000000))
+        } else {
+            self.castling_rights & 0b0100 != 0
+                && !self.occupancy_bitboard.intersects(Bitboard(0x60))
+                && !attacked.intersects(Bitboard(0x60))
+        }
     }
 
     const SLIDER_TABLE_ENTRIES: [SliderTableEntry; 128] = {
@@ -1477,22 +1464,22 @@ impl std::fmt::Display for Position {
                     6 => writeln!(
                         f,
                         "castling rights: {}{}{}{}{}",
-                        if self.castling_rights & Self::KINGSIDE_RIGHT_MASK[0] != 0 {
+                        if self.castling_rights & 0b0100 != 0 {
                             "K"
                         } else {
                             ""
                         },
-                        if self.castling_rights & Self::QUEENSIDE_RIGHT_MASK[0] != 0 {
+                        if self.castling_rights & 0b1000 != 0 {
                             "Q"
                         } else {
                             ""
                         },
-                        if self.castling_rights & Self::KINGSIDE_RIGHT_MASK[1] != 0 {
+                        if self.castling_rights & 0b0001 != 0 {
                             "k"
                         } else {
                             ""
                         },
-                        if self.castling_rights & Self::QUEENSIDE_RIGHT_MASK[1] != 0 {
+                        if self.castling_rights & 0b0010 != 0 {
                             "q"
                         } else {
                             ""

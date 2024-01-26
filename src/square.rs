@@ -1,3 +1,4 @@
+//! Enumerations of chessboard accessing constants, such as files, ranks and squares.
 use crate::bitboard::Bitboard;
 
 /// Files of a chessboard (A-H).
@@ -29,6 +30,10 @@ impl File {
         }
     }
 
+    /// A file from a given index.
+    ///
+    /// Fails if the index is more than 7.
+    #[inline(always)]
     pub fn from_index(index: u8) -> Option<Self> {
         if index < 8 {
             Some(unsafe { Self::from_index_unchecked(index) })
@@ -37,6 +42,10 @@ impl File {
         }
     }
 
+    /// A file from a given index.
+    /// # Safety
+    /// If the index is more than 7, results in undefined behavior.
+    #[inline(always)]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
@@ -106,6 +115,10 @@ impl Rank {
         }
     }
 
+    /// A rank from a given index.
+    ///
+    /// Fails if the index is more than 7.
+    #[inline(always)]
     pub fn from_index(index: u8) -> Option<Self> {
         if index < 8 {
             Some(unsafe { Self::from_index_unchecked(index) })
@@ -114,6 +127,10 @@ impl Rank {
         }
     }
 
+    /// A rank from a given index.
+    /// # Safety
+    /// If the index is more than 7, results in undefined behavior.
+    #[inline(always)]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
@@ -210,6 +227,7 @@ impl Square {
     /// Instantitates a new square from its index.
     ///
     /// Returns `None` if the index is more than 63.
+    #[inline(always)]
     pub const fn from_index(index: u8) -> Option<Self> {
         if index < 64 {
             Some(unsafe { Self::from_index_unchecked(index) })
@@ -221,6 +239,7 @@ impl Square {
     /// Instantitates a new square from its index.
     /// # Safety
     /// If the index is more than 63, causes undefined behavior.
+    #[inline(always)]
     pub const unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
@@ -282,16 +301,13 @@ impl Square {
 
     /// An iterator over all square, ordered in big-endian rank/little-endian file.
     pub fn squares_fen_iter() -> impl Iterator<Item = Self> {
-        (0..8)
-            .rev()
-            .map(|rank| {
-                (0..8).map(move |file| unsafe {
-                    let rank = Rank::from_index_unchecked(rank);
-                    let file = File::from_index_unchecked(file);
-                    Square::new(file, rank)
-                })
+        (0..8).rev().flat_map(|rank| {
+            (0..8).map(move |file| unsafe {
+                let rank = Rank::from_index_unchecked(rank);
+                let file = File::from_index_unchecked(file);
+                Square::new(file, rank)
             })
-            .flatten()
+        })
     }
 
     /// Returns a bitboard containing only this square.
@@ -299,41 +315,29 @@ impl Square {
     pub(crate) const fn bitboard(self) -> Bitboard {
         Bitboard(1 << (self as u8))
     }
-    /// Returns a bitboard containing only squares on the same file as this one.
-    #[inline(always)]
-    pub(crate) const fn file_bitboard(self) -> Bitboard {
-        self.file().bitboard()
-    }
-    /// Returns a bitboard containing only squares on the same rank as this one.
-    #[inline(always)]
-    pub(crate) const fn rank_bitboard(self) -> Bitboard {
-        self.rank().bitboard()
-    }
 }
 impl std::ops::Add<Delta> for Square {
     type Output = Square;
 
     fn add(self, rhs: Delta) -> Self::Output {
-        assert!((self as i8) < (64i8 - (rhs as i8)));
         unsafe { std::mem::transmute((self as u8).wrapping_add_signed(rhs as i8)) }
     }
 }
 impl std::ops::AddAssign<Delta> for Square {
     fn add_assign(&mut self, rhs: Delta) {
-        todo!()
+        *self = *self + rhs
     }
 }
 impl std::ops::Sub<Delta> for Square {
     type Output = Square;
 
     fn sub(self, rhs: Delta) -> Self::Output {
-        assert!(self as i8 > rhs as i8);
         unsafe { std::mem::transmute((self as u8).wrapping_add_signed(-(rhs as i8))) }
     }
 }
 impl std::ops::SubAssign<Delta> for Square {
     fn sub_assign(&mut self, rhs: Delta) {
-        todo!()
+        *self = *self - rhs
     }
 }
 impl std::fmt::Display for Square {

@@ -1,13 +1,15 @@
+//! Bitboards are an efficient way to represent sets of up to 64 elements,
+//! and are used extensively in the board representation.
+
 use std::{iter::FusedIterator, u8};
 
 use crate::square::{Delta, Square};
 
-///! Bitboards are data structures used to efficiently represent the board state.
-///!
-///! They are augmented u64 values.
-
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+/// Bitboards are data structures used to efficiently represent the board state.
+///
+/// They are augmented u64 values.
 pub struct Bitboard(pub(crate) u64);
 impl std::fmt::Debug for Bitboard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

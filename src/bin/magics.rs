@@ -1,8 +1,8 @@
+//! Small binary to efficiently generate good magics for sliders' moves
+//! hash tables.
 use chameleon::square::{Delta, Square};
 use rand::prelude::*;
 
-///! Small binary to efficiently generate good magics for sliders' moves
-///! hash tables.
 pub fn main() {
     println!("Magics generator");
     println!("by Aloïs Rautureau <alois.rautureau@ens-rennes.fr>");
@@ -10,10 +10,7 @@ pub fn main() {
     let args = std::env::args().collect::<Vec<_>>();
 
     let array_output = if let Some(format) = args.get(1) {
-        match format.as_str() {
-            "array" => true,
-            _ => false,
-        }
+        format.as_str() == "array"
     } else {
         false
     };
