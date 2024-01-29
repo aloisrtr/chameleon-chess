@@ -1,6 +1,6 @@
 //! Small binary to efficiently generate good magics for sliders' moves
 //! hash tables.
-use chameleon::square::{Delta, Square};
+use chameleon_chess::square::{Delta, Square};
 use rand::prelude::*;
 
 pub fn main() {

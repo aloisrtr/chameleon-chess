@@ -57,6 +57,7 @@ struct HistoryEntry {
     pub castling_rights: u8,
     pub reversible_moves: u8,
     pub en_passant_file: Option<File>,
+    pub hash: u64,
 }
 
 /// Existing types of pieces.
@@ -89,7 +90,7 @@ impl std::fmt::Display for PieceKind {
 
 /// Represents a valid chess position and defines an API to interact with said
 /// position (making, unmaking, generating moves, etc).
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Position {
     // 8x8 array to find which piece sits on which square.
     pieces: [Option<PieceKind>; 64],
@@ -100,11 +101,13 @@ pub struct Position {
     // Bitboard containing occupancy information.
     occupancy_bitboard: Bitboard,
 
+    // Metadata
     black_to_move: bool,
     castling_rights: u8,
     reversible_moves: u8,
     en_passant_file: Option<File>,
     history: ArrayVec<HistoryEntry, 1024>,
+    hash: u64,
 }
 impl Default for Position {
     /// A position with no pieces.
@@ -120,6 +123,7 @@ impl Default for Position {
             reversible_moves: 0,
             en_passant_file: None,
             history: ArrayVec::new(),
+            hash: 0,
         }
     }
 }
@@ -202,7 +206,10 @@ impl Position {
 
         position.black_to_move = match *sections.get(1).ok_or(FenError::Incomplete)? {
             "w" => false,
-            "b" => true,
+            "b" => {
+                position.hash ^= Self::side_to_move_hash();
+                true
+            }
             _ => return Err(FenError::UnexpectedToken { index: 0, val: '0' }),
         };
 
@@ -211,10 +218,22 @@ impl Position {
             let mut empty = false;
             for c in sections.get(2).ok_or(FenError::Incomplete)?.chars() {
                 match c {
-                    'k' => rights |= 0b0001,
-                    'q' => rights |= 0b0010,
-                    'K' => rights |= 0b0100,
-                    'Q' => rights |= 0b1000,
+                    'k' => {
+                        position.hash ^= Self::kingside_right_hash::<true>();
+                        rights |= 0b0001
+                    }
+                    'q' => {
+                        position.hash ^= Self::queenside_right_hash::<true>();
+                        rights |= 0b0010
+                    }
+                    'K' => {
+                        position.hash ^= Self::kingside_right_hash::<false>();
+                        rights |= 0b0100
+                    }
+                    'Q' => {
+                        position.hash ^= Self::queenside_right_hash::<false>();
+                        rights |= 0b1000
+                    }
                     '-' => empty = true,
                     c => return Err(FenError::UnexpectedToken { index: 0, val: c }),
                 }
@@ -228,11 +247,14 @@ impl Position {
 
         position.en_passant_file = match *sections.get(3).ok_or(FenError::Incomplete)? {
             "-" => None,
-            s => Some(
-                s.parse::<Square>()
+            s => {
+                let file = s
+                    .parse::<Square>()
                     .map_err(|_| FenError::ParseError)?
-                    .file(),
-            ),
+                    .file();
+                position.hash ^= Self::en_passant_file_hash(file);
+                Some(file)
+            }
         };
 
         position.reversible_moves = sections.get(4).unwrap_or(&"0").parse().unwrap();
@@ -252,7 +274,13 @@ impl Position {
         self.piece_bitboards[kind as usize] |= on.bitboard();
         self.color_bitboards[black as usize] |= on.bitboard();
         self.occupancy_bitboard |= on.bitboard();
-        self.pieces[on as usize] = Some(kind)
+        self.pieces[on as usize] = Some(kind);
+
+        self.hash ^= if black {
+            Self::piece_hash::<true>(kind, on)
+        } else {
+            Self::piece_hash::<true>(kind, on)
+        }
     }
 
     /// Returns the piece kind and color sitting on a given square if any.
@@ -311,12 +339,16 @@ impl Position {
                 castling_rights: position.castling_rights,
                 reversible_moves: position.reversible_moves,
                 en_passant_file: position.en_passant_file,
+                hash: position.hash,
             });
 
             // Reset en passant file if any
-            position.en_passant_file = None;
+            if let Some(en_passant_file) = position.en_passant_file.take() {
+                position.hash ^= Position::en_passant_file_hash(en_passant_file)
+            }
 
             // Modify castling rights if needed
+            // TODO: update hash
             for modified in move_bitboard & Bitboard(0x9100000000000091) {
                 match modified {
                     Square::E1 => position.castling_rights &= !0b1100,
@@ -336,6 +368,8 @@ impl Position {
                     .get_unchecked_mut(PieceKind::Pawn as usize) ^= origin.bitboard();
                 *position.piece_bitboards.get_unchecked_mut(to as usize) ^= origin.bitboard();
                 *position.pieces.get_unchecked_mut(origin as usize) = Some(to);
+                position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, origin);
+                position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(to, origin);
                 moving_kind = to;
 
                 if mv.is_capture() {
@@ -347,6 +381,11 @@ impl Position {
                         .piece_bitboards
                         .get_unchecked_mut(captured as usize) ^= target.bitboard();
                     position.occupancy_bitboard ^= target.bitboard();
+                    if BLACK_TO_MOVE {
+                        position.hash ^= Position::piece_hash::<false>(captured, target);
+                    } else {
+                        position.hash ^= Position::piece_hash::<true>(captured, target);
+                    }
                 }
                 position.reversible_moves = 0
             } else if mv.is_capture() {
@@ -367,6 +406,11 @@ impl Position {
                     .piece_bitboards
                     .get_unchecked_mut(captured as usize) ^= target.bitboard();
                 position.occupancy_bitboard ^= target.bitboard();
+                if BLACK_TO_MOVE {
+                    position.hash ^= Position::piece_hash::<false>(captured, target);
+                } else {
+                    position.hash ^= Position::piece_hash::<true>(captured, target);
+                }
                 position.reversible_moves = 0
             } else if mv.special_1_is_set() {
                 let (rook_origin, rook_target) = if mv.special_0_is_set() {
@@ -390,9 +434,14 @@ impl Position {
                     .pieces
                     .get_unchecked_mut(rook_origin as usize)
                     .take();
+                position.hash ^=
+                    Position::piece_hash::<BLACK_TO_MOVE>(PieceKind::Rook, rook_origin);
+                position.hash ^=
+                    Position::piece_hash::<BLACK_TO_MOVE>(PieceKind::Rook, rook_target);
                 position.reversible_moves = 0
             } else if mv.special_0_is_set() {
                 position.en_passant_file = Some(origin.file());
+                position.hash ^= Position::en_passant_file_hash(origin.file());
                 position.reversible_moves = 0
             } else if moving_kind != PieceKind::Pawn {
                 position.reversible_moves += 1
@@ -408,8 +457,11 @@ impl Position {
             position.occupancy_bitboard ^= move_bitboard;
             *position.pieces.get_unchecked_mut(target as usize) =
                 position.pieces.get_unchecked_mut(origin as usize).take();
+            position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, origin);
+            position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, target);
 
             position.black_to_move = !BLACK_TO_MOVE;
+            position.hash ^= Position::side_to_move_hash();
         }
 
         if self.black_to_move {
@@ -434,6 +486,7 @@ impl Position {
                 castling_rights,
                 reversible_moves,
                 en_passant_file,
+                hash,
             }: HistoryEntry,
         ) {
             let us_index = BLACK_TO_MOVE as usize;
@@ -444,6 +497,7 @@ impl Position {
             position.reversible_moves = reversible_moves;
             position.en_passant_file = en_passant_file;
             position.black_to_move = BLACK_TO_MOVE;
+            position.hash = hash;
 
             // Unmake the move
             let origin = played.origin();
@@ -1440,6 +1494,131 @@ impl Position {
 
         result
     };
+
+    /// Returns the Zobrist hash of the position.
+    pub fn zobrist_hash(&self) -> u64 {
+        self.hash
+    }
+
+    // We need :
+    // - one number from piece on each square (64 * 12)
+    // - one number for side to move
+    // - four numbers for castling rights
+    // - eight numbers for en passant file
+
+    // We use overlapping keys to make it efficiently cachable.
+    // Accesses are byte aligned, making it so that we only need 784 bytes instead of
+    // 3124 bytes for aligned access.
+    const fn piece_hash<const BLACK_PIECE: bool>(kind: PieceKind, square: Square) -> u64 {
+        const WHITE_PIECES_HASH: *const u8 = Position::ZOBRIST_KEYS.as_ptr().cast();
+        const BLACK_PIECES_HASH: *const u8 = unsafe {
+            Position::ZOBRIST_KEYS
+                .as_ptr()
+                .cast::<u8>()
+                .offset((64 * 6) as isize)
+        };
+        unsafe {
+            let piece_offset = kind as isize * square as isize;
+            if BLACK_PIECE {
+                BLACK_PIECES_HASH
+                    .offset(piece_offset)
+                    .cast::<u64>()
+                    .read_unaligned()
+            } else {
+                WHITE_PIECES_HASH
+                    .offset(piece_offset)
+                    .cast::<u64>()
+                    .read_unaligned()
+            }
+        }
+    }
+    const fn side_to_move_hash() -> u64 {
+        const SIDE_TO_MOVE_HASH: *const u64 = unsafe {
+            Position::ZOBRIST_KEYS
+                .as_ptr()
+                .cast::<u8>()
+                .offset((64 * 12) as isize)
+                .cast()
+        };
+        unsafe { SIDE_TO_MOVE_HASH.read_unaligned() }
+    }
+    const fn queenside_right_hash<const BLACK: bool>() -> u64 {
+        const QUEENSIDE_RIGHT_WHITE_HASH: *const u64 = unsafe {
+            Position::ZOBRIST_KEYS
+                .as_ptr()
+                .cast::<u8>()
+                .offset((64 * 12 + 1) as isize)
+                .cast()
+        };
+        const QUEENSIDE_RIGHT_BLACK_HASH: *const u64 = unsafe {
+            Position::ZOBRIST_KEYS
+                .as_ptr()
+                .cast::<u8>()
+                .offset((64 * 12 + 3) as isize)
+                .cast()
+        };
+        unsafe {
+            if BLACK {
+                QUEENSIDE_RIGHT_BLACK_HASH.read_unaligned()
+            } else {
+                QUEENSIDE_RIGHT_WHITE_HASH.read_unaligned()
+            }
+        }
+    }
+    const fn kingside_right_hash<const BLACK: bool>() -> u64 {
+        const KINGSIDE_RIGHT_WHITE_HASH: *const u64 = unsafe {
+            Position::ZOBRIST_KEYS
+                .as_ptr()
+                .cast::<u8>()
+                .offset((64 * 12 + 2) as isize)
+                .cast()
+        };
+        const KINGSIDE_RIGHT_BLACK_HASH: *const u64 = unsafe {
+            Position::ZOBRIST_KEYS
+                .as_ptr()
+                .cast::<u8>()
+                .offset((64 * 12 + 4) as isize)
+                .cast()
+        };
+        unsafe {
+            if BLACK {
+                KINGSIDE_RIGHT_BLACK_HASH.read_unaligned()
+            } else {
+                KINGSIDE_RIGHT_WHITE_HASH.read_unaligned()
+            }
+        }
+    }
+    const fn en_passant_file_hash(file: File) -> u64 {
+        const EN_PASSANT_FILE_HASH: *const u8 = unsafe {
+            Position::ZOBRIST_KEYS
+                .as_ptr()
+                .cast::<u8>()
+                .offset((64 * 12 + 5) as isize)
+                .cast()
+        };
+        unsafe {
+            EN_PASSANT_FILE_HASH
+                .offset(file as isize)
+                .cast::<u64>()
+                .read_unaligned()
+        }
+    }
+    const ZOBRIST_KEYS: [u64; 196] = {
+        let mut result = [0; 196];
+
+        let mut i = 0;
+        while i < 196 {
+            result[i] = const_random::const_random!(u64);
+            i += 1
+        }
+
+        result
+    };
+}
+impl std::hash::Hash for Position {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state)
+    }
 }
 impl std::fmt::Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1486,6 +1665,7 @@ impl std::fmt::Display for Position {
                         },
                         if self.castling_rights == 0 { "-" } else { "" }
                     ),
+                    7 => writeln!(f, "hash: {:#0x}", self.hash),
                     _ => writeln!(f),
                 }?
             }

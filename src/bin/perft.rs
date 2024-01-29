@@ -1,5 +1,6 @@
-use chameleon::position::Position;
+use chameleon_chess::position::Position;
 use clap::Parser;
+use rayon::prelude::*;
 
 #[derive(Parser)]
 #[command(author, version)]
@@ -10,7 +11,11 @@ struct Arguments {
     #[arg(short, long)]
     bulk_counting: bool,
     #[arg(short, long)]
-    verbose: bool,
+    divide: bool,
+    #[arg(short, long)]
+    hash: bool,
+    #[arg(short, long)]
+    parallel: bool,
     position: Option<String>,
 }
 
@@ -24,46 +29,58 @@ fn main() {
     };
     println!("{position}\n");
 
-    for depth in 0..=args.depth {
-        println!(
-            "depth {depth}: {} nodes",
-            perft(
-                &mut position,
-                depth,
-                args.bulk_counting,
-                args.split_depth.unwrap_or(0)
-            )
-        );
+    for depth in 1..=args.depth {
+        let nodes: u64 = if args.parallel {
+            position
+                .moves()
+                .par_iter()
+                .map(|&mv| {
+                    let mut position = position.clone();
+                    unsafe { position.make_unchecked(mv) };
+                    let mv_nodes = perft(&mut position, depth - 1, args.bulk_counting);
+                    position.unmake();
+                    if args.divide {
+                        println!("{}. {mv}: {mv_nodes} nodes", depth - 1);
+                    }
+                    mv_nodes
+                })
+                .sum()
+        } else {
+            position
+                .moves()
+                .iter()
+                .map(|&mv| {
+                    unsafe { position.make_unchecked(mv) };
+                    let mv_nodes = perft(&mut position, depth - 1, args.bulk_counting);
+                    position.unmake();
+                    if args.divide {
+                        println!("{}. {mv}: {mv_nodes} nodes", depth - 1);
+                    }
+                    mv_nodes
+                })
+                .sum()
+        };
+        println!("depth {depth}: {nodes} nodes",);
     }
 }
 
 /// Traverses all nodes accessible from a given position, returning the number of
 /// nodes traversed.
-fn perft(position: &mut Position, depth_left: u8, bulk_counting: bool, split_at: u8) -> u64 {
+fn perft(position: &mut Position, depth_left: u8, bulk_counting: bool) -> u64 {
     if depth_left == 0 {
         1
     } else if depth_left == 1 && bulk_counting {
         position.moves().len() as u64
     } else {
-        if split_at != 0 {
-            println!()
-        }
-        let mut nodes = 0;
-        for mv in position.moves() {
-            unsafe { position.make_unchecked(mv) };
-            let mv_nodes = perft(
-                position,
-                depth_left - 1,
-                bulk_counting,
-                split_at.saturating_sub(1),
-            );
-            nodes += mv_nodes;
-            position.unmake();
-
-            if split_at != 0 {
-                println!("{mv}: {mv_nodes} nodes")
-            }
-        }
-        nodes
+        position
+            .moves()
+            .iter()
+            .map(|&mv| {
+                unsafe { position.make_unchecked(mv) };
+                let mv_nodes = perft(position, depth_left - 1, bulk_counting);
+                position.unmake();
+                mv_nodes
+            })
+            .sum()
     }
 }
