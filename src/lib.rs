@@ -6,6 +6,7 @@
 //! binary for analysis or competitions.
 
 pub mod bitboard;
+mod lookup_tables;
 pub mod r#move;
 pub mod position;
 pub mod square;
