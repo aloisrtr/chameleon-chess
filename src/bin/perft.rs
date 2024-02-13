@@ -16,6 +16,8 @@ struct Arguments {
     hash: bool,
     #[arg(short, long)]
     parallel: bool,
+    #[arg(short, long)]
+    iterative: bool,
     position: Option<String>,
 }
 
@@ -29,7 +31,7 @@ fn main() {
     };
     println!("{position}\n");
 
-    for depth in 1..=args.depth {
+    for depth in (if args.iterative { 1 } else { args.depth })..=args.depth {
         let nodes: u64 = if args.parallel {
             position
                 .moves()

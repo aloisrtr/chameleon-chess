@@ -49,6 +49,18 @@ pub enum PieceKind {
     Queen = 4,
     King = 5,
 }
+impl PieceKind {
+    /// Checks if this piece kind is a diagonal slider.
+    #[inline(always)]
+    pub fn is_diagonal_slider(self) -> bool {
+        (self as u8 + 3) & 0b101 == 0b101
+    }
+    /// Checks if this piece kind is an orthogonal slider.
+    #[inline(always)]
+    pub fn is_orthogonal_slider(self) -> bool {
+        (self as u8 + 3) & 0b110 == 0b110
+    }
+}
 impl std::fmt::Display for PieceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -617,12 +629,12 @@ impl Position {
             let king = position.piece_bitboards[PieceKind::King as usize] & us;
             let king_square = king.lowest_set_square_unchecked();
 
-            // Test for pins and attacks.
+            // Test for absolute pins and attacks.
             // We generate moves for pinned pieces directly when detecting them. Those
             // pieces are masked from bitboards afterwards.
 
-            // If we find a direct attack to the king, we can now ignore pinned pieces
-            // since their moves are known to be illegal.
+            // If we find a direct attack to the king, we can now ignore absolutely
+            // pinned pieces since their moves are known to be illegal anyway
 
             // Represents the checkers, or squares containing opponent pieces if none is found.
             let mut capturable = Bitboard::empty();
@@ -638,6 +650,7 @@ impl Position {
                 | ((ennemy_pawns & !File::A.bitboard()) - pawn_east_attack);
 
             let ennemy_knights = position.piece_bitboards[PieceKind::Knight as usize] & them;
+            // TODO: Parallel generation of knight attacks using SIMD
             for origin in ennemy_knights {
                 attacked |= Position::knight_moves(origin)
             }
@@ -653,28 +666,34 @@ impl Position {
 
             // The enemy king cannot check us legally,
             // but we still need to compute the squares it attacks.
-            let ennemy_king = (position.piece_bitboards[PieceKind::King as usize] & them)
-                .lowest_set_square_unchecked();
-            attacked |= Position::king_moves(ennemy_king);
+            attacked |= Position::king_moves(
+                (position.piece_bitboards[PieceKind::King as usize] & them)
+                    .lowest_set_square_unchecked(),
+            );
 
             // We then deal with ray attacks. These can produce pins and are blockable.
             // For each sliding piece, we generate its moves and then check for two scenarios:
             // - either the piece directly attacks our king, we're in check and add the slider to the `capturable` set.
             // - or the piece can attack our king when xraying our pieces. In this case, the slider might create a pin.
+
+            // We need to xray our king to account for slide-aways attacked squares.
+            let non_king = position.occupancy_bitboard ^ king;
+
+            // Diagonal attacks
             let ennemy_queens = position.piece_bitboards[PieceKind::Queen as usize] & them;
             let ennemy_bishops = position.piece_bitboards[PieceKind::Bishop as usize] & them;
             let ennemy_diagonals = ennemy_queens | ennemy_bishops;
 
             let king_diagonal_rays = Position::diagonal_moves(king_square, them);
-            let non_king = position.occupancy_bitboard ^ king;
 
             for origin in ennemy_diagonals {
+                // For each diagonal attacker, generate its attack targets.
                 let attack = Position::diagonal_moves(origin, non_king);
                 attacked |= attack;
 
                 // This piece is checking our king, add it to the checkers and add the
                 // ray to the movable squares.
-                if attack.intersects(king) {
+                if attack.is_set(king_square) {
                     capturable |= origin.bitboard();
                     movable |= Position::diagonal_moves(origin, position.occupancy_bitboard)
                         & king_diagonal_rays;
@@ -685,45 +704,44 @@ impl Position {
                 else if king_diagonal_rays.is_set(origin) {
                     let ray = Position::diagonal_moves(origin, king) & king_diagonal_rays;
                     let pinned = ray & us;
+                    // If the ray is blocked by more than one friendly piece, they
+                    // are not pinned and we can keep going.
                     if pinned.has_more_than_one() {
                         continue;
                     }
-                    let ray = ray ^ pinned;
-                    let pinned_square = pinned.lowest_set_square_unchecked();
 
                     // Remove the pinned piece from normal move generation
                     us ^= pinned;
 
                     // Then generate its moves (if any) if we're not already in check.
                     if capturable.is_empty() {
+                        let movable_ray = ray ^ pinned;
+                        let pinned_square = pinned.lowest_set_square_unchecked();
+
                         // If the pinned piece is a corresponding slider, move it along the
                         // ray and generate a capture
-                        if (position.piece_bitboards[PieceKind::Bishop as usize]
-                            | position.piece_bitboards[PieceKind::Queen as usize])
-                            .intersects(pinned)
+                        if position.pieces[pinned_square as usize]
+                            .unwrap_unchecked()
+                            .is_diagonal_slider()
                         {
-                            for target in ray {
-                                moves.push_unchecked(LegalMove::new_quiet(pinned_square, target))
-                            }
+                            moves.extend(
+                                movable_ray.map(|t| LegalMove::new_quiet(pinned_square, t)),
+                            );
                             moves.push_unchecked(LegalMove::new_capture(pinned_square, origin))
                         }
                         // If the pinned piece is a pawn, it can only capture the piece directly
                         // or capture en passant. Note that captures can be promotions.
-                        else if position.piece_bitboards[PieceKind::Pawn as usize]
-                            .intersects(pinned)
-                        {
+                        else if position.pieces[pinned_square as usize] == Some(PieceKind::Pawn) {
                             if ((pinned & !File::H.bitboard()) + pawn_east_attack).is_set(origin)
                                 || ((pinned & !File::A.bitboard()) + pawn_west_attack)
                                     .is_set(origin)
                             {
                                 // Promotion capture
                                 if pinned.intersects(promotion_rank) {
-                                    moves
-                                        .try_extend_from_slice(&LegalMove::new_promotion_capture(
-                                            pinned_square,
-                                            origin,
-                                        ))
-                                        .unwrap_unchecked();
+                                    moves.extend(LegalMove::new_promotion_capture(
+                                        pinned_square,
+                                        origin,
+                                    ))
                                 } else {
                                     moves.push_unchecked(LegalMove::new_capture(
                                         pinned_square,
@@ -744,7 +762,7 @@ impl Position {
                 }
             }
 
-            // Repeat for orthogonal sliders
+            // Orthogonal attacks
             let ennemy_rooks = position.piece_bitboards[PieceKind::Rook as usize] & them;
             let ennemy_orthogonals = ennemy_rooks | ennemy_queens;
 
@@ -756,7 +774,7 @@ impl Position {
 
                 // This piece is checking our king, add it to the checkers and add the
                 // ray to the movable squares.
-                if attack.intersects(king) {
+                if attack.is_set(king_square) {
                     capturable |= origin.bitboard();
                     movable |= king_orthogonal_rays
                         & Position::orthogonal_moves(origin, position.occupancy_bitboard);
@@ -770,35 +788,33 @@ impl Position {
                     if pinned.has_more_than_one() {
                         continue;
                     }
-                    let ray = ray ^ pinned;
-                    let pinned_square = pinned.lowest_set_square_unchecked();
 
                     // Remove the pinned piece from normal move generation
                     us ^= pinned;
 
                     // Then generate its moves (if any) if we're not already in check.
                     if capturable.is_empty() {
+                        let movable_ray = ray ^ pinned;
+                        let pinned_square = pinned.lowest_set_square_unchecked();
                         // If the pinned piece is a corresponding slider, move it along the
                         // ray and generate a capture
-                        if (position.piece_bitboards[PieceKind::Rook as usize]
-                            | position.piece_bitboards[PieceKind::Queen as usize])
-                            .intersects(pinned)
+                        if position.pieces[pinned_square as usize]
+                            .unwrap_unchecked()
+                            .is_orthogonal_slider()
                         {
-                            for target in ray {
-                                moves.push_unchecked(LegalMove::new_quiet(pinned_square, target))
-                            }
+                            moves.extend(
+                                movable_ray.map(|t| LegalMove::new_quiet(pinned_square, t)),
+                            );
                             moves.push_unchecked(LegalMove::new_capture(pinned_square, origin))
                         }
                         // If the pinned piece is a pawn, it can only push or double push
                         // if its on its original square.
-                        else if position.piece_bitboards[PieceKind::Pawn as usize]
-                            .intersects(pinned)
-                        {
+                        else if position.pieces[pinned_square as usize] == Some(PieceKind::Pawn) {
                             let single_push = pinned + pawn_push;
-                            if let Some(target) = (single_push & ray).next() {
+                            if let Some(target) = (single_push & movable_ray).next() {
                                 moves.push(LegalMove::new_quiet(pinned_square, target));
                                 if let Some(target) =
-                                    (((single_push & double_push_rank) + pawn_push) & ray)
+                                    (((single_push & double_push_rank) + pawn_push) & movable_ray)
                                         .lowest_set_square()
                                 {
                                     moves.push_unchecked(LegalMove::new_double_push(
@@ -839,56 +855,61 @@ impl Position {
                 let promoting_pawns = pawns & promotion_rank;
                 let pawns = pawns ^ promoting_pawns;
 
-                let single_push = (pawns + pawn_push) & !position.occupancy_bitboard;
-                let double_push = ((single_push & double_push_rank) + pawn_push) & movable;
-                for target in double_push {
-                    moves.push_unchecked(LegalMove::new_double_push(
-                        target - pawn_push - pawn_push,
-                        target,
-                    ))
-                }
+                let single_push_targets = (pawns + pawn_push) & !position.occupancy_bitboard;
+                let single_push_origins = (single_push_targets & movable) - pawn_push;
+                moves.extend(
+                    single_push_origins
+                        .zip(single_push_targets & movable)
+                        .map(|(o, t)| LegalMove::new_quiet(o, t)),
+                );
+                let double_push_targets =
+                    ((single_push_targets & double_push_rank) + pawn_push) & movable;
+                let double_push_origins = double_push_targets - pawn_push - pawn_push;
+                moves.extend(
+                    double_push_origins
+                        .zip(double_push_targets)
+                        .map(|(o, t)| LegalMove::new_double_push(o, t)),
+                );
 
-                for target in single_push & movable {
-                    moves.push_unchecked(LegalMove::new_quiet(target - pawn_push, target))
-                }
+                let east_captures_targets =
+                    ((pawns & !File::H.bitboard()) + pawn_east_attack) & capturable;
+                let east_captures_origins = east_captures_targets - pawn_east_attack;
+                moves.extend(
+                    east_captures_origins
+                        .zip(east_captures_targets)
+                        .map(|(o, t)| LegalMove::new_capture(o, t)),
+                );
+                let west_captures_targets =
+                    ((pawns & !File::A.bitboard()) + pawn_west_attack) & capturable;
+                let west_captures_origins = west_captures_targets - pawn_west_attack;
+                moves.extend(
+                    west_captures_origins
+                        .zip(west_captures_targets)
+                        .map(|(o, t)| LegalMove::new_capture(o, t)),
+                );
 
-                let east_captures = ((pawns & !File::H.bitboard()) + pawn_east_attack) & capturable;
-                for target in east_captures {
-                    moves.push_unchecked(LegalMove::new_capture(target - pawn_east_attack, target))
+                let promoting_push_targets = (promoting_pawns + pawn_push) & movable;
+                let promoting_push_origins = promoting_push_targets - pawn_push;
+                for (origin, target) in promoting_push_origins.zip(promoting_push_targets) {
+                    moves.extend(LegalMove::new_promotion(origin, target))
                 }
-                let west_captures = ((pawns & !File::A.bitboard()) + pawn_west_attack) & capturable;
-                for target in west_captures {
-                    moves.push_unchecked(LegalMove::new_capture(target - pawn_west_attack, target))
-                }
-
-                let promoting_push = (promoting_pawns + pawn_push) & movable;
-                for target in promoting_push {
-                    moves
-                        .try_extend_from_slice(&LegalMove::new_promotion(
-                            target - pawn_push,
-                            target,
-                        ))
-                        .unwrap_unchecked()
-                }
-                let promoting_east_captures =
+                let promoting_east_captures_targets =
                     ((promoting_pawns & !File::H.bitboard()) + pawn_east_attack) & capturable;
-                for target in promoting_east_captures {
-                    moves
-                        .try_extend_from_slice(&LegalMove::new_promotion_capture(
-                            target - pawn_east_attack,
-                            target,
-                        ))
-                        .unwrap_unchecked()
+                let promoting_east_captures_origins =
+                    promoting_east_captures_targets - pawn_east_attack;
+                for (origin, target) in
+                    promoting_east_captures_origins.zip(promoting_east_captures_targets)
+                {
+                    moves.extend(LegalMove::new_promotion_capture(origin, target))
                 }
-                let promoting_west_captures =
+                let promoting_west_captures_targets =
                     ((promoting_pawns & !File::A.bitboard()) + pawn_west_attack) & capturable;
-                for target in promoting_west_captures {
-                    moves
-                        .try_extend_from_slice(&LegalMove::new_promotion_capture(
-                            target - pawn_west_attack,
-                            target,
-                        ))
-                        .unwrap_unchecked()
+                let promoting_west_captures_origins =
+                    promoting_west_captures_targets - pawn_west_attack;
+                for (origin, target) in
+                    promoting_west_captures_origins.zip(promoting_west_captures_targets)
+                {
+                    moves.extend(LegalMove::new_promotion_capture(origin, target))
                 }
 
                 // En passant is a bit tricky as it can leave the king in check.
@@ -949,13 +970,10 @@ impl Position {
                 let knights = position.piece_bitboards[PieceKind::Knight as usize] & us;
                 for origin in knights {
                     let knight_moves = Position::knight_moves(origin);
-                    for target in knight_moves & movable {
-                        moves.push_unchecked(LegalMove::new_quiet(origin, target))
-                    }
-
-                    for target in knight_moves & capturable {
-                        moves.push_unchecked(LegalMove::new_capture(origin, target))
-                    }
+                    moves.extend((knight_moves & movable).map(|t| LegalMove::new_quiet(origin, t)));
+                    moves.extend(
+                        (knight_moves & capturable).map(|t| LegalMove::new_capture(origin, t)),
+                    );
                 }
 
                 // Sliding pieces
@@ -965,39 +983,36 @@ impl Position {
                 for origin in diagonal_sliders {
                     let diagonal_moves =
                         Position::diagonal_moves(origin, position.occupancy_bitboard);
-                    for target in diagonal_moves & movable {
-                        moves.push_unchecked(LegalMove::new_quiet(origin, target))
-                    }
-
-                    for target in diagonal_moves & capturable {
-                        moves.push_unchecked(LegalMove::new_capture(origin, target))
-                    }
+                    moves.extend(
+                        (diagonal_moves & movable).map(|t| LegalMove::new_quiet(origin, t)),
+                    );
+                    moves.extend(
+                        (diagonal_moves & capturable).map(|t| LegalMove::new_capture(origin, t)),
+                    );
                 }
 
                 let orthogonal_sliders = (position.piece_bitboards[PieceKind::Rook as usize]
                     | position.piece_bitboards[PieceKind::Queen as usize])
                     & us;
                 for origin in orthogonal_sliders {
-                    let diagonal_moves =
+                    let orthogonal_moves =
                         Position::orthogonal_moves(origin, position.occupancy_bitboard);
-                    for target in diagonal_moves & movable {
-                        moves.push_unchecked(LegalMove::new_quiet(origin, target))
-                    }
-
-                    for target in diagonal_moves & capturable {
-                        moves.push_unchecked(LegalMove::new_capture(origin, target))
-                    }
+                    moves.extend(
+                        (orthogonal_moves & movable).map(|t| LegalMove::new_quiet(origin, t)),
+                    );
+                    moves.extend(
+                        (orthogonal_moves & capturable).map(|t| LegalMove::new_capture(origin, t)),
+                    );
                 }
             }
 
             // We always generate king moves.
             let king_moves = Position::king_moves(king_square) & !attacked;
-            for target in king_moves & !position.occupancy_bitboard {
-                moves.push_unchecked(LegalMove::new_quiet(king_square, target));
-            }
-            for target in king_moves & them {
-                moves.push_unchecked(LegalMove::new_capture(king_square, target));
-            }
+            moves.extend(
+                (king_moves & !position.occupancy_bitboard)
+                    .map(|t| LegalMove::new_quiet(king_square, t)),
+            );
+            moves.extend((king_moves & them).map(|t| LegalMove::new_capture(king_square, t)));
 
             moves
         }
