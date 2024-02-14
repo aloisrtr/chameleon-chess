@@ -599,32 +599,24 @@ impl Position {
             let mut us = position.color_bitboards[us_index];
             let them = position.color_bitboards[them_index];
 
-            let (
-                pawn_push,
-                pawn_east_attack,
-                pawn_west_attack,
-                promotion_rank,
-                en_passant_rank,
-                double_push_rank,
-            ) = if BLACK_TO_MOVE {
-                (
-                    Delta::South,
-                    Delta::SouthEast,
-                    Delta::SouthWest,
-                    Rank::Two.bitboard(),
-                    Rank::Three.bitboard(),
-                    Rank::Six.bitboard(),
-                )
-            } else {
-                (
-                    Delta::North,
-                    Delta::NorthEast,
-                    Delta::NorthWest,
-                    Rank::Seven.bitboard(),
-                    Rank::Six.bitboard(),
-                    Rank::Three.bitboard(),
-                )
-            };
+            let (pawn_push, pawn_east_attack, pawn_west_attack, promotion_rank, double_push_rank) =
+                if BLACK_TO_MOVE {
+                    (
+                        Delta::South,
+                        Delta::SouthEast,
+                        Delta::SouthWest,
+                        Rank::Two.bitboard(),
+                        Rank::Six.bitboard(),
+                    )
+                } else {
+                    (
+                        Delta::North,
+                        Delta::NorthEast,
+                        Delta::NorthWest,
+                        Rank::Seven.bitboard(),
+                        Rank::Three.bitboard(),
+                    )
+                };
 
             let king = position.piece_bitboards[PieceKind::King as usize] & us;
             let king_square = king.lowest_set_square_unchecked();
@@ -680,11 +672,15 @@ impl Position {
             let non_king = position.occupancy_bitboard ^ king;
 
             // Diagonal attacks
-            let ennemy_queens = position.piece_bitboards[PieceKind::Queen as usize] & them;
             let ennemy_bishops = position.piece_bitboards[PieceKind::Bishop as usize] & them;
+            let ennemy_rooks = position.piece_bitboards[PieceKind::Rook as usize] & them;
+            let ennemy_queens = position.piece_bitboards[PieceKind::Queen as usize] & them;
+
             let ennemy_diagonals = ennemy_queens | ennemy_bishops;
+            let ennemy_orthogonals = ennemy_rooks | ennemy_queens;
 
             let king_diagonal_rays = Position::diagonal_moves(king_square, them);
+            let king_orthogonal_rays = Position::orthogonal_moves(king_square, them);
 
             for origin in ennemy_diagonals {
                 // For each diagonal attacker, generate its attack targets.
@@ -750,12 +746,32 @@ impl Position {
                                 }
                             }
 
-                            // En passant captures are hell.
+                            // En passant captures.
                             // We first check if the target is on the pin ray.
                             // If it is, we then check if the pawn to be captured
                             // doesn't discover a check
-                            if let Some(_file) = position.en_passant_file {
-                                // TODO
+                            if let Some(file) = position.en_passant_file {
+                                let (target_rank, capture_rank) = if BLACK_TO_MOVE {
+                                    (Rank::Three.bitboard(), Rank::Four.bitboard())
+                                } else {
+                                    (Rank::Six.bitboard(), Rank::Five.bitboard())
+                                };
+                                let captured = file.bitboard() & capture_rank;
+                                let target =
+                                    (file.bitboard() & target_rank).lowest_set_square_unchecked();
+                                let capturers = ((captured & !File::H.bitboard()) + Delta::East)
+                                    | ((captured & !File::A.bitboard()) + Delta::West);
+
+                                if movable_ray.is_set(target)
+                                    && capturers.is_set(pinned_square)
+                                    && !(Position::orthogonal_moves(
+                                        king_square,
+                                        position.occupancy_bitboard ^ captured ^ pinned,
+                                    ) & capture_rank)
+                                        .intersects(ennemy_orthogonals)
+                                {
+                                    moves.push_unchecked(LegalMove::new_en_passant(origin, target))
+                                }
                             }
                         }
                     }
@@ -763,11 +779,6 @@ impl Position {
             }
 
             // Orthogonal attacks
-            let ennemy_rooks = position.piece_bitboards[PieceKind::Rook as usize] & them;
-            let ennemy_orthogonals = ennemy_rooks | ennemy_queens;
-
-            let king_orthogonal_rays = Position::orthogonal_moves(king_square, them);
-
             for origin in ennemy_orthogonals {
                 let attack = Position::orthogonal_moves(origin, non_king);
                 attacked |= attack;
@@ -831,25 +842,27 @@ impl Position {
             // Decide what to do based on the number of checkers.
             // If more than one checker, no moves other than the king's are legal.
             // Otherwise, we generate moves as we generally do.
-            if capturable.has_at_most_one() {
-                if capturable.is_empty() {
-                    // If no checker: generate castling moves and restore capturable and movable masks
-                    // to the opponent and empty squares respectively.
-                    capturable = them;
-                    movable = !position.occupancy_bitboard;
+            let checkers_count = capturable.cardinality();
+            if checkers_count != 0 {
+                // Clear pinned piece moves that might have been generated
+                // before going forward
+                moves.clear()
+            } else {
+                // If no checker: generate castling moves and restore capturable and movable masks
+                // to the opponent and empty squares respectively.
+                capturable = them;
+                movable = !position.occupancy_bitboard;
 
-                    if position.queenside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
-                        moves.push_unchecked(LegalMove::new_queenside_castle::<BLACK_TO_MOVE>())
-                    }
-                    if position.kingside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
-                        moves.push_unchecked(LegalMove::new_kingside_castle::<BLACK_TO_MOVE>())
-                    }
-                } else {
-                    // Otherwise, clear pinned piece moves that might have been generated
-                    // before going forward
-                    moves.clear()
+                if position.queenside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
+                    moves.push_unchecked(LegalMove::new_queenside_castle::<BLACK_TO_MOVE>())
                 }
+                if position.kingside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
+                    moves.push_unchecked(LegalMove::new_kingside_castle::<BLACK_TO_MOVE>())
+                }
+            }
 
+            // We generate moves for all pieces only if we're not in double check
+            if checkers_count < 2 {
                 // Pawn moves
                 let pawns = position.piece_bitboards[PieceKind::Pawn as usize] & us;
                 let promoting_pawns = pawns & promotion_rank;
@@ -916,13 +929,13 @@ impl Position {
                 // Those moves are rare enough that we can check carefully for illegal
                 // en passant capture without caring too much about the cost.
                 if let Some(file) = position.en_passant_file {
-                    let capture_rank = if BLACK_TO_MOVE {
-                        Rank::Four.bitboard()
+                    let (target_rank, capture_rank) = if BLACK_TO_MOVE {
+                        (Rank::Three.bitboard(), Rank::Four.bitboard())
                     } else {
-                        Rank::Five.bitboard()
+                        (Rank::Six.bitboard(), Rank::Five.bitboard())
                     };
                     let captured = file.bitboard() & capture_rank;
-                    let target = (file.bitboard() & en_passant_rank).lowest_set_square_unchecked();
+                    let target = (file.bitboard() & target_rank).lowest_set_square_unchecked();
 
                     if captured.intersects(capturable) || movable.is_set(target) {
                         let east_attacker =
@@ -937,11 +950,6 @@ impl Position {
                             position.occupancy_bitboard & !captured & !east_attacker,
                         ) & capture_rank)
                             .intersects(ennemy_orthogonals)
-                            && !Position::diagonal_moves(
-                                king_square,
-                                position.occupancy_bitboard & !captured,
-                            )
-                            .intersects(ennemy_diagonals)
                         {
                             if let Some(origin) = east_attacker.lowest_set_square() {
                                 moves.push_unchecked(LegalMove::new_en_passant(origin, target))
@@ -953,11 +961,6 @@ impl Position {
                             position.occupancy_bitboard & !captured & !west_attacker,
                         ) & capture_rank)
                             .intersects(ennemy_orthogonals)
-                            && !Position::diagonal_moves(
-                                king_square,
-                                position.occupancy_bitboard & !captured,
-                            )
-                            .intersects(ennemy_diagonals)
                         {
                             if let Some(origin) = west_attacker.lowest_set_square() {
                                 moves.push_unchecked(LegalMove::new_en_passant(origin, target))
