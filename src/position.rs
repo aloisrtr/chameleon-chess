@@ -1044,12 +1044,12 @@ impl Position {
     /// Returns diagonal slider moves from an origin square and given blockers.
     #[inline(always)]
     fn diagonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
-        SLIDERS_TABLE.1[origin as usize].get(blockers)
+        SLIDERS_TABLE_ENTRIES[origin as usize].get(blockers)
     }
     /// Returns orthogonal slider moves from an origin square and given blockers.
     #[inline(always)]
     fn orthogonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
-        SLIDERS_TABLE.1[origin as usize + 64].get(blockers)
+        SLIDERS_TABLE_ENTRIES[origin as usize + 64].get(blockers)
     }
 
     /// Checks if the side can castle queenside.
