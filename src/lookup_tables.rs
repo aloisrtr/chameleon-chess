@@ -3,8 +3,31 @@ use crate::{
     square::{Delta, File, Square},
 };
 
+/// Returns knight moves from an origin square.
+#[inline(always)]
+pub fn knight_moves(origin: Square) -> Bitboard {
+    KNIGHT_MOVES[origin as usize]
+}
+
+/// Returns king moves from an origin square.
+#[inline(always)]
+pub fn king_moves(origin: Square) -> Bitboard {
+    KING_MOVES[origin as usize]
+}
+
+/// Returns diagonal slider moves from an origin square and given blockers.
+#[inline(always)]
+pub fn diagonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
+    SLIDERS_TABLE_ENTRIES[origin as usize].get(blockers)
+}
+/// Returns orthogonal slider moves from an origin square and given blockers.
+#[inline(always)]
+pub fn orthogonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
+    SLIDERS_TABLE_ENTRIES[origin as usize + 64].get(blockers)
+}
+
 /// Lookup for king moves from a given square.
-pub const KING_MOVES: [Bitboard; 64] = {
+const KING_MOVES: [Bitboard; 64] = {
     let mut result = [Bitboard::empty(); 64];
     let mut origin = 0;
     let west = File::A.bitboard().invert();
@@ -26,7 +49,7 @@ pub const KING_MOVES: [Bitboard; 64] = {
 };
 
 /// Lookup for knight moves from a given square.
-pub const KNIGHT_MOVES: [Bitboard; 64] = {
+const KNIGHT_MOVES: [Bitboard; 64] = {
     let mut result = [Bitboard::empty(); 64];
     let mut origin = 0;
     let west = File::A.bitboard().invert();
@@ -82,16 +105,16 @@ impl SliderTableEntry {
     pub fn get(self, blockers: Bitboard) -> Bitboard {
         unsafe {
             self.table
-                .offset(
+                .add(
                     ((blockers.0 & self.blockers_mask.0).wrapping_mul(self.magic) >> self.shift)
-                        as isize,
+                        as usize,
                 )
                 .read()
         }
     }
 }
 
-pub const SLIDERS_TABLE_ENTRIES: [SliderTableEntry; 128] = {
+const SLIDERS_TABLE_ENTRIES: [SliderTableEntry; 128] = {
     let magics: [u64; 128] = [
         293861533946085504,
         99361787782299656,
@@ -373,7 +396,7 @@ pub const SLIDERS_TABLE_ENTRIES: [SliderTableEntry; 128] = {
         entries[square] = entry;
 
         square += 1;
-        table = unsafe { table.offset((1 << bits) as isize) };
+        table = unsafe { table.add(1 << bits) };
     }
     entries
 };
@@ -381,7 +404,7 @@ pub const SLIDERS_TABLE_ENTRIES: [SliderTableEntry; 128] = {
 /// This constant is computed ASSUMING THAT SLIDER_TABLE_ENTRIES IS CORRECT.
 /// If this assumptioN doesn't hold, the program is entirely incorrect.
 #[allow(long_running_const_eval)]
-pub const SLIDERS_TABLE: [Bitboard; 107648] = {
+const SLIDERS_TABLE: [Bitboard; 107648] = {
     let magics: [u64; 128] = [
         293861533946085504,
         99361787782299656,

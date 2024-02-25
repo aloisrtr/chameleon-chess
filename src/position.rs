@@ -644,13 +644,13 @@ impl Position {
             let ennemy_knights = position.piece_bitboards[PieceKind::Knight as usize] & them;
             // TODO: Parallel generation of knight attacks using SIMD
             for origin in ennemy_knights {
-                attacked |= Position::knight_moves(origin)
+                attacked |= knight_moves(origin)
             }
 
             // If any of those attacked squares intersects with our king, we find the checkers
             // and add them to the `capturable` set.
             if attacked.intersects(king) {
-                capturable |= Position::knight_moves(king_square) & ennemy_knights;
+                capturable |= knight_moves(king_square) & ennemy_knights;
                 capturable |= (((king & !File::H.bitboard()) + pawn_east_attack)
                     | ((king & !File::A.bitboard()) + pawn_west_attack))
                     & ennemy_pawns;
@@ -658,7 +658,7 @@ impl Position {
 
             // The enemy king cannot check us legally,
             // but we still need to compute the squares it attacks.
-            attacked |= Position::king_moves(
+            attacked |= king_moves(
                 (position.piece_bitboards[PieceKind::King as usize] & them)
                     .lowest_set_square_unchecked(),
             );
@@ -679,26 +679,26 @@ impl Position {
             let ennemy_diagonals = ennemy_queens | ennemy_bishops;
             let ennemy_orthogonals = ennemy_rooks | ennemy_queens;
 
-            let king_diagonal_rays = Position::diagonal_moves(king_square, them);
-            let king_orthogonal_rays = Position::orthogonal_moves(king_square, them);
+            let king_diagonal_rays = diagonal_moves(king_square, them);
+            let king_orthogonal_rays = orthogonal_moves(king_square, them);
 
             for origin in ennemy_diagonals {
                 // For each diagonal attacker, generate its attack targets.
-                let attack = Position::diagonal_moves(origin, non_king);
+                let attack = diagonal_moves(origin, non_king);
                 attacked |= attack;
 
                 // This piece is checking our king, add it to the checkers and add the
                 // ray to the movable squares.
                 if attack.is_set(king_square) {
                     capturable |= origin.bitboard();
-                    movable |= Position::diagonal_moves(origin, position.occupancy_bitboard)
-                        & king_diagonal_rays;
+                    movable |=
+                        diagonal_moves(origin, position.occupancy_bitboard) & king_diagonal_rays;
                 }
                 // This piece is accessible by our king when ignoring our own pieces, so it
                 // might create a pin. This is checked by counting the number of our own pieces
                 // intersected by the ray.
                 else if king_diagonal_rays.is_set(origin) {
-                    let ray = Position::diagonal_moves(origin, king) & king_diagonal_rays;
+                    let ray = diagonal_moves(origin, king) & king_diagonal_rays;
                     let pinned = ray & us;
                     // If the ray is blocked by more than one friendly piece, they
                     // are not pinned and we can keep going.
@@ -762,14 +762,7 @@ impl Position {
                                 let capturers = ((captured & !File::H.bitboard()) + Delta::East)
                                     | ((captured & !File::A.bitboard()) + Delta::West);
 
-                                if movable_ray.is_set(target)
-                                    && capturers.is_set(pinned_square)
-                                    && !(Position::orthogonal_moves(
-                                        king_square,
-                                        position.occupancy_bitboard ^ captured ^ pinned,
-                                    ) & capture_rank)
-                                        .intersects(ennemy_orthogonals)
-                                {
+                                if movable_ray.is_set(target) && capturers.is_set(pinned_square) {
                                     moves.push_unchecked(LegalMove::new_en_passant(origin, target))
                                 }
                             }
@@ -780,7 +773,7 @@ impl Position {
 
             // Orthogonal attacks
             for origin in ennemy_orthogonals {
-                let attack = Position::orthogonal_moves(origin, non_king);
+                let attack = orthogonal_moves(origin, non_king);
                 attacked |= attack;
 
                 // This piece is checking our king, add it to the checkers and add the
@@ -788,13 +781,13 @@ impl Position {
                 if attack.is_set(king_square) {
                     capturable |= origin.bitboard();
                     movable |= king_orthogonal_rays
-                        & Position::orthogonal_moves(origin, position.occupancy_bitboard);
+                        & orthogonal_moves(origin, position.occupancy_bitboard);
                 }
                 // This piece is accessible by our king when ignoring our own pieces, so it
                 // might create a pin. This is checked by counting the number of our own pieces
                 // intersected by the ray.
                 else if king_orthogonal_rays.is_set(origin) {
-                    let ray = Position::orthogonal_moves(origin, king) & king_orthogonal_rays;
+                    let ray = orthogonal_moves(origin, king) & king_orthogonal_rays;
                     let pinned = ray & us;
                     if pinned.has_more_than_one() {
                         continue;
@@ -945,7 +938,7 @@ impl Position {
 
                         // Check if the king could be attacked if the attacked and attacker
                         // left the board
-                        if !(Position::orthogonal_moves(
+                        if !(orthogonal_moves(
                             king_square,
                             position.occupancy_bitboard & !captured & !east_attacker,
                         ) & capture_rank)
@@ -956,7 +949,7 @@ impl Position {
                             }
                         }
                         // Same for west attacks
-                        if !(Position::orthogonal_moves(
+                        if !(orthogonal_moves(
                             king_square,
                             position.occupancy_bitboard & !captured & !west_attacker,
                         ) & capture_rank)
@@ -972,7 +965,7 @@ impl Position {
                 // Knight moves
                 let knights = position.piece_bitboards[PieceKind::Knight as usize] & us;
                 for origin in knights {
-                    let knight_moves = Position::knight_moves(origin);
+                    let knight_moves = knight_moves(origin);
                     moves.extend((knight_moves & movable).map(|t| LegalMove::new_quiet(origin, t)));
                     moves.extend(
                         (knight_moves & capturable).map(|t| LegalMove::new_capture(origin, t)),
@@ -984,8 +977,7 @@ impl Position {
                     | position.piece_bitboards[PieceKind::Queen as usize])
                     & us;
                 for origin in diagonal_sliders {
-                    let diagonal_moves =
-                        Position::diagonal_moves(origin, position.occupancy_bitboard);
+                    let diagonal_moves = diagonal_moves(origin, position.occupancy_bitboard);
                     moves.extend(
                         (diagonal_moves & movable).map(|t| LegalMove::new_quiet(origin, t)),
                     );
@@ -998,8 +990,7 @@ impl Position {
                     | position.piece_bitboards[PieceKind::Queen as usize])
                     & us;
                 for origin in orthogonal_sliders {
-                    let orthogonal_moves =
-                        Position::orthogonal_moves(origin, position.occupancy_bitboard);
+                    let orthogonal_moves = orthogonal_moves(origin, position.occupancy_bitboard);
                     moves.extend(
                         (orthogonal_moves & movable).map(|t| LegalMove::new_quiet(origin, t)),
                     );
@@ -1010,7 +1001,7 @@ impl Position {
             }
 
             // We always generate king moves.
-            let king_moves = Position::king_moves(king_square) & !attacked;
+            let king_moves = king_moves(king_square) & !attacked;
             moves.extend(
                 (king_moves & !position.occupancy_bitboard)
                     .map(|t| LegalMove::new_quiet(king_square, t)),
@@ -1027,29 +1018,6 @@ impl Position {
                 moves_generic::<false>(self)
             }
         }
-    }
-
-    /// Returns knight moves from an origin square.
-    #[inline(always)]
-    fn knight_moves(origin: Square) -> Bitboard {
-        KNIGHT_MOVES[origin as usize]
-    }
-
-    /// Returns king moves from an origin square.
-    #[inline(always)]
-    fn king_moves(origin: Square) -> Bitboard {
-        KING_MOVES[origin as usize]
-    }
-
-    /// Returns diagonal slider moves from an origin square and given blockers.
-    #[inline(always)]
-    fn diagonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
-        SLIDERS_TABLE_ENTRIES[origin as usize].get(blockers)
-    }
-    /// Returns orthogonal slider moves from an origin square and given blockers.
-    #[inline(always)]
-    fn orthogonal_moves(origin: Square, blockers: Bitboard) -> Bitboard {
-        SLIDERS_TABLE_ENTRIES[origin as usize + 64].get(blockers)
     }
 
     /// Checks if the side can castle queenside.
