@@ -38,6 +38,25 @@ struct HistoryEntry {
     pub hash: u64,
 }
 
+/// Colors for each player.
+#[repr(u8)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
+pub enum Color {
+    White = 0,
+    Black = 1,
+}
+impl Color {
+    /// Inverts the color.
+    #[inline]
+    pub fn invert(&mut self) {
+        *self = if *self == Color::Black {
+            Color::White
+        } else {
+            Color::Black
+        }
+    }
+}
+
 /// Existing types of pieces.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -92,7 +111,7 @@ pub struct Position {
     occupancy_bitboard: Bitboard,
 
     // Metadata
-    black_to_move: bool,
+    side_to_move: Color,
     castling_rights: u8,
     reversible_moves: u8,
     en_passant_file: Option<File>,
@@ -108,7 +127,7 @@ impl Default for Position {
             color_bitboards: [Bitboard::empty(); 2],
             occupancy_bitboard: Bitboard::empty(),
 
-            black_to_move: false,
+            side_to_move: Color::White,
             castling_rights: 0b1111,
             reversible_moves: 0,
             en_passant_file: None,
@@ -194,11 +213,11 @@ impl Position {
             }
         }
 
-        position.black_to_move = match *sections.get(1).ok_or(FenError::Incomplete)? {
-            "w" => false,
+        position.side_to_move = match *sections.get(1).ok_or(FenError::Incomplete)? {
+            "w" => Color::White,
             "b" => {
                 position.hash ^= Self::side_to_move_hash();
-                true
+                Color::Black
             }
             _ => return Err(FenError::UnexpectedToken { index: 0, val: '0' }),
         };
@@ -450,11 +469,11 @@ impl Position {
             position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, origin);
             position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, target);
 
-            position.black_to_move = !BLACK_TO_MOVE;
+            position.side_to_move.invert();
             position.hash ^= Position::side_to_move_hash();
         }
 
-        if self.black_to_move {
+        if self.side_to_move == Color::Black {
             make_unchecked_generic::<true>(self, mv);
         } else {
             make_unchecked_generic::<false>(self, mv);
@@ -486,7 +505,11 @@ impl Position {
             position.castling_rights = castling_rights;
             position.reversible_moves = reversible_moves;
             position.en_passant_file = en_passant_file;
-            position.black_to_move = BLACK_TO_MOVE;
+            position.side_to_move = if BLACK_TO_MOVE {
+                Color::Black
+            } else {
+                Color::White
+            };
             position.hash = hash;
 
             // Unmake the move
@@ -573,7 +596,7 @@ impl Position {
 
         if let Some(history_entry) = self.history.pop() {
             unsafe {
-                if self.black_to_move {
+                if self.side_to_move == Color::Black {
                     unmake_generic::<false>(self, history_entry)
                 } else {
                     unmake_generic::<true>(self, history_entry)
@@ -1012,7 +1035,7 @@ impl Position {
         }
 
         unsafe {
-            if self.black_to_move {
+            if self.side_to_move == Color::Black {
                 moves_generic::<true>(self)
             } else {
                 moves_generic::<false>(self)
@@ -1191,7 +1214,11 @@ impl std::fmt::Display for Position {
                     3 => writeln!(
                         f,
                         "side to move: {}",
-                        if self.black_to_move { "black" } else { "white" }
+                        if self.side_to_move == Color::Black {
+                            "black"
+                        } else {
+                            "white"
+                        }
                     ),
                     4 => writeln!(f, "reversible moves: {}", self.reversible_moves),
                     5 => writeln!(

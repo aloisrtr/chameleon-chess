@@ -16,7 +16,7 @@ pub enum File {
 }
 impl File {
     /// Returns the set of all squares within a given file as a bitboard.
-    #[inline(always)]
+    #[inline]
     pub(crate) const fn bitboard(self) -> Bitboard {
         match self {
             Self::A => Bitboard(0x0101010101010101),
@@ -33,7 +33,7 @@ impl File {
     /// A file from a given index.
     ///
     /// Fails if the index is more than 7.
-    #[inline(always)]
+    #[inline]
     pub fn from_index(index: u8) -> Option<Self> {
         if index < 8 {
             Some(unsafe { Self::from_index_unchecked(index) })
@@ -45,7 +45,7 @@ impl File {
     /// A file from a given index.
     /// # Safety
     /// If the index is more than 7, results in undefined behavior.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
@@ -101,7 +101,7 @@ pub enum Rank {
 }
 impl Rank {
     /// Returns the set of all squares within a given rank as a bitboard.
-    #[inline(always)]
+    #[inline]
     pub(crate) const fn bitboard(self) -> Bitboard {
         match self {
             Self::One => Bitboard(0x00000000000000FF),
@@ -118,7 +118,7 @@ impl Rank {
     /// A rank from a given index.
     ///
     /// Fails if the index is more than 7.
-    #[inline(always)]
+    #[inline]
     pub fn from_index(index: u8) -> Option<Self> {
         if index < 8 {
             Some(unsafe { Self::from_index_unchecked(index) })
@@ -130,7 +130,7 @@ impl Rank {
     /// A rank from a given index.
     /// # Safety
     /// If the index is more than 7, results in undefined behavior.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
@@ -219,15 +219,15 @@ pub enum Square {
 }
 impl Square {
     /// Instantiates a new square based on file and rank.
-    #[inline(always)]
+    #[inline]
     pub const fn new(file: File, rank: Rank) -> Self {
-        unsafe { std::mem::transmute(8 * (rank as u8) + file as u8) }
+        unsafe { std::mem::transmute((rank as u8) << 3 | (file as u8)) }
     }
 
     /// Instantitates a new square from its index.
     ///
     /// Returns `None` if the index is more than 63.
-    #[inline(always)]
+    #[inline]
     pub const fn from_index(index: u8) -> Option<Self> {
         if index < 64 {
             Some(unsafe { Self::from_index_unchecked(index) })
@@ -239,18 +239,18 @@ impl Square {
     /// Instantitates a new square from its index.
     /// # Safety
     /// If the index is more than 63, causes undefined behavior.
-    #[inline(always)]
+    #[inline]
     pub const unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
 
     /// Returns the rank of the square.
-    #[inline(always)]
+    #[inline]
     pub const fn rank(self) -> Rank {
         unsafe { std::mem::transmute((self as u8) >> 3) }
     }
     /// Returns the file of the square.
-    #[inline(always)]
+    #[inline]
     pub const fn file(self) -> File {
         unsafe { std::mem::transmute((self as u8) & 7) }
     }
@@ -258,7 +258,7 @@ impl Square {
     /// Translates this square by a given delta.
     ///
     /// Returns `None` if the translation would go out of the board.
-    #[inline(always)]
+    #[inline]
     pub const fn translate(self, delta: Delta) -> Option<Self> {
         if match delta {
             Delta::North => (self.rank() as usize) < 7,
@@ -289,7 +289,7 @@ impl Square {
     /// # Safety
     /// Doing a translation that would result in an out of board square is
     /// undefined behavior.
-    #[inline(always)]
+    #[inline]
     pub const unsafe fn translate_unchecked(self, delta: Delta) -> Self {
         std::mem::transmute((self as u8).wrapping_add_signed(delta as i8))
     }
@@ -311,7 +311,7 @@ impl Square {
     }
 
     /// Returns a bitboard containing only this square.
-    #[inline(always)]
+    #[inline]
     pub(crate) const fn bitboard(self) -> Bitboard {
         Bitboard(1 << (self as u8))
     }

@@ -5,83 +5,78 @@ use std::{iter::FusedIterator, u8};
 
 use crate::square::{Delta, Square};
 
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 /// Bitboards are data structures used to efficiently represent the board state.
 ///
 /// They are augmented u64 values.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Bitboard(pub(crate) u64);
-impl std::fmt::Debug for Bitboard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (i, square) in Square::squares_fen_iter().enumerate() {
-            if i % 8 == 0 && i != 0 {
-                writeln!(f)?
-            }
-            write!(f, "{} ", if self.is_set(square) { 'x' } else { '.' })?
-        }
-        Ok(())
-    }
-}
+
 impl Bitboard {
+    /// The empty bitboard.
+    pub const EMPTY: Self = Self(0);
+    /// The full (universe) bitboard.
+    pub const UNIVERSE: Self = Self(u64::MAX);
+
     /// Returns an empty bitboard.
-    #[inline(always)]
+    #[inline]
     pub const fn empty() -> Self {
-        Self(0)
+        Self::EMPTY
     }
 
     /// Returns the universal set (all bits to 1).
-    #[inline(always)]
-    pub const fn universal() -> Self {
-        Self(u64::MAX)
+    #[inline]
+    pub const fn universe() -> Self {
+        Self::UNIVERSE
     }
 
     /// Checks if a bitboard is empty.
-    #[inline(always)]
-    pub const fn is_empty(self) -> bool {
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
         self.0 == 0
     }
 
     /// Checks if a bitboard has one or more bits set.
-    #[inline(always)]
-    pub const fn is_not_empty(self) -> bool {
+    #[inline]
+    pub const fn is_not_empty(&self) -> bool {
         self.0 != 0
     }
 
     /// Checks if a given square is set on the bitboard.
-    #[inline(always)]
-    pub const fn is_set(self, square: Square) -> bool {
+    #[inline]
+    pub const fn is_set(&self, square: Square) -> bool {
         self.intersects(square.bitboard())
     }
 
     /// Checks if a bitboard has only one bit set.
-    #[inline(always)]
-    pub const fn is_single_populated(self) -> bool {
+    #[inline]
+    pub const fn is_single_populated(&self) -> bool {
         self.0.is_power_of_two()
     }
 
     /// Checks if a bitboard has zero or one bits set.
-    #[inline(always)]
-    pub const fn has_at_most_one(self) -> bool {
+    #[inline]
+    pub const fn has_at_most_one(&self) -> bool {
         (self.0 & self.0.wrapping_sub(1)) == 0
     }
 
     /// Checks if a bitboard has more than one bit set.
-    #[inline(always)]
-    pub const fn has_more_than_one(self) -> bool {
+    #[inline]
+    pub const fn has_more_than_one(&self) -> bool {
         (self.0 & self.0.wrapping_sub(1)) != 0
     }
 
     /// Returns the cardinality of the bitboard (i.e. how many squares are set).
-    #[inline(always)]
-    pub const fn cardinality(self) -> u8 {
+    #[inline]
+    pub const fn cardinality(&self) -> u8 {
         self.0.count_ones() as u8
     }
 
     /// Returns the index of the LS1B in the bitboard.
     ///
     /// If the bitboard is empty, returns `None`.
-    #[inline(always)]
-    pub const fn lowest_set_square(self) -> Option<Square> {
+    #[inline]
+    pub const fn lowest_set_square(&self) -> Option<Square> {
         if !self.is_empty() {
             Some(unsafe { self.lowest_set_square_unchecked() })
         } else {
@@ -90,19 +85,20 @@ impl Bitboard {
     }
 
     /// Returns the index of the LS1B in the bitboard.
+    ///
     /// # Safety
     /// If passed an empty bitboard, the index will be 64 (out of bounds thus not usable).
-    #[inline(always)]
-    pub const unsafe fn lowest_set_square_unchecked(self) -> Square {
+    #[inline]
+    pub const unsafe fn lowest_set_square_unchecked(&self) -> Square {
         Square::from_index_unchecked(self.0.trailing_zeros() as u8)
     }
 
     /// Pops the LS1B in the bitboard and returns its index.
     ///
     /// If the bitboard is empty, returns `None`.
-    #[inline(always)]
+    #[inline]
     pub fn pop_lowest_set_square(&mut self) -> Option<Square> {
-        if !Bitboard::is_empty(*self) {
+        if !Bitboard::is_empty(self) {
             Some(unsafe { self.pop_lowest_set_square_unchecked() })
         } else {
             None
@@ -112,18 +108,18 @@ impl Bitboard {
     /// Pops the LS1B in the bitboard and returns its index.
     /// # Safety
     /// If passed an empty bitboard, the returned index will be 64 (out of bounds thus not usable)
-    #[inline(always)]
+    #[inline]
     pub unsafe fn pop_lowest_set_square_unchecked(&mut self) -> Square {
-        let index = self.lowest_set_square_unchecked();
+        let square = self.lowest_set_square_unchecked();
         self.0 &= self.0.wrapping_sub(1);
-        index
+        square
     }
 
     /// Returns the index of the MS1B in the bitboard.
     ///
     /// If the bitboard is empty, returns `None`.
-    #[inline(always)]
-    pub const fn highest_set_square(self) -> Option<Square> {
+    #[inline]
+    pub const fn highest_set_square(&self) -> Option<Square> {
         if !self.is_empty() {
             Some(unsafe { self.highest_set_square_unchecked() })
         } else {
@@ -134,17 +130,17 @@ impl Bitboard {
     /// Returns the index of the MS1B in the bitboard.
     /// # Safety
     /// If passed an empty bitboard, the index will be 64 (out of bounds thus not usable).
-    #[inline(always)]
-    pub const unsafe fn highest_set_square_unchecked(self) -> Square {
+    #[inline]
+    pub const unsafe fn highest_set_square_unchecked(&self) -> Square {
         Square::from_index_unchecked(self.0.leading_zeros() as u8)
     }
 
     /// Pops the MS1B in the bitboard and returns its index.
     ///
     /// If the bitboard is empty, returns `None`.
-    #[inline(always)]
+    #[inline]
     pub fn pop_highest_set_square(&mut self) -> Option<Square> {
-        if !Bitboard::is_empty(*self) {
+        if !Bitboard::is_empty(self) {
             Some(unsafe { self.pop_highest_set_square_unchecked() })
         } else {
             None
@@ -154,29 +150,36 @@ impl Bitboard {
     /// Pops the LS1B in the bitboard and returns its index.
     /// # Safety
     /// If passed an empty bitboard, the returned index will be 64 (out of bounds thus not usable)
-    #[inline(always)]
+    #[inline]
     pub unsafe fn pop_highest_set_square_unchecked(&mut self) -> Square {
-        let index = self.highest_set_square_unchecked();
-        *self &= !index.bitboard();
-        index
+        let square = self.highest_set_square_unchecked();
+        *self ^= square.bitboard();
+        square
+    }
+
+    /// Rotates the bitboard. This can be thought of as "looking at it from the
+    /// opponent's perspective".
+    #[inline]
+    pub fn rotate(&self) -> Self {
+        Self(self.0.swap_bytes())
     }
 
     /// Returns true if two bitboards intersect i.e. have at least one common
     /// set square.
-    #[inline(always)]
-    pub const fn intersects(self, other: Self) -> bool {
+    #[inline]
+    pub const fn intersects(&self, other: Self) -> bool {
         self.0 & other.0 != 0
     }
 
     /// Returns the intersection of two bitboard.
-    #[inline(always)]
-    pub const fn intersection(self, other: Self) -> Self {
+    #[inline]
+    pub const fn intersection(&self, other: Self) -> Self {
         Self(self.0 & other.0)
     }
 
     /// Applies shifts all bits of the bitboard in the given direction.
-    #[inline(always)]
-    pub const fn shift(self, delta: Delta) -> Self {
+    #[inline]
+    pub const fn shift(&self, delta: Delta) -> Self {
         Self(if 0 < delta as i8 {
             self.0 << (delta as u8)
         } else {
@@ -185,66 +188,174 @@ impl Bitboard {
     }
 
     /// Inverts the bitboard.
-    #[inline(always)]
-    pub const fn invert(self) -> Self {
+    #[inline]
+    pub const fn invert(&self) -> Self {
         Self(!self.0)
     }
 }
-impl std::ops::BitAnd for Bitboard {
-    type Output = Self;
 
-    #[inline(always)]
+// [BitAnd] implementations
+impl std::ops::BitAnd for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
     fn bitand(self, rhs: Self) -> Self::Output {
-        Self(self.0 & rhs.0)
+        Bitboard(self.0 & rhs.0)
     }
 }
+impl std::ops::BitAnd for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Bitboard(self.0 & rhs.0)
+    }
+}
+impl std::ops::BitAnd<&Bitboard> for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitand(self, rhs: &Self) -> Self::Output {
+        Bitboard(self.0 & rhs.0)
+    }
+}
+impl std::ops::BitAnd<Bitboard> for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitand(self, rhs: Bitboard) -> Self::Output {
+        Bitboard(self.0 & rhs.0)
+    }
+}
+
 impl std::ops::BitAndAssign for Bitboard {
-    #[inline(always)]
+    #[inline]
     fn bitand_assign(&mut self, rhs: Self) {
         self.0 &= rhs.0
     }
 }
-impl std::ops::BitOr for Bitboard {
-    type Output = Self;
+impl std::ops::BitAndAssign<&Bitboard> for Bitboard {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: &Bitboard) {
+        self.0 &= rhs.0
+    }
+}
 
-    #[inline(always)]
+// [BitOr] implementations
+impl std::ops::BitOr for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
     fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.0 | rhs.0)
+        Bitboard(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOr for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Bitboard(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOr<&Bitboard> for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitor(self, rhs: &Self) -> Self::Output {
+        Bitboard(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOr<Bitboard> for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitor(self, rhs: Bitboard) -> Self::Output {
+        Bitboard(self.0 | rhs.0)
     }
 }
 impl std::ops::BitOrAssign for Bitboard {
-    #[inline(always)]
+    #[inline]
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0
     }
 }
-impl std::ops::BitXor for Bitboard {
-    type Output = Self;
+impl std::ops::BitOrAssign<&Bitboard> for Bitboard {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: &Bitboard) {
+        self.0 |= rhs.0
+    }
+}
 
-    #[inline(always)]
+// [BitXor] implementations
+impl std::ops::BitXor for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
     fn bitxor(self, rhs: Self) -> Self::Output {
-        Self(self.0 ^ rhs.0)
+        Bitboard(self.0 ^ rhs.0)
+    }
+}
+impl std::ops::BitXor for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Bitboard(self.0 ^ rhs.0)
+    }
+}
+impl std::ops::BitXor<&Bitboard> for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitxor(self, rhs: &Self) -> Self::Output {
+        Bitboard(self.0 ^ rhs.0)
+    }
+}
+impl std::ops::BitXor<Bitboard> for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn bitxor(self, rhs: Bitboard) -> Self::Output {
+        Bitboard(self.0 ^ rhs.0)
     }
 }
 impl std::ops::BitXorAssign for Bitboard {
-    #[inline(always)]
+    #[inline]
     fn bitxor_assign(&mut self, rhs: Self) {
         self.0 ^= rhs.0
     }
 }
-impl std::ops::Not for Bitboard {
-    type Output = Self;
-
-    #[inline(always)]
-    fn not(self) -> Self::Output {
-        Self(!self.0)
+impl std::ops::BitXorAssign<&Bitboard> for Bitboard {
+    #[inline]
+    fn bitxor_assign(&mut self, rhs: &Bitboard) {
+        self.0 ^= rhs.0
     }
 }
 
+// [BitNot] implementations
+impl std::ops::Not for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn not(self) -> Self::Output {
+        Bitboard(!self.0)
+    }
+}
+impl std::ops::Not for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn not(self) -> Self::Output {
+        Bitboard(!self.0)
+    }
+}
+
+// [Add] implementations (shifts).
 impl std::ops::Add<Delta> for Bitboard {
     type Output = Self;
 
-    #[inline(always)]
+    #[inline]
     fn add(self, rhs: Delta) -> Self::Output {
         Self(if 0 < rhs as i8 {
             self.0 << (rhs as u8)
@@ -254,7 +365,7 @@ impl std::ops::Add<Delta> for Bitboard {
     }
 }
 impl std::ops::AddAssign<Delta> for Bitboard {
-    #[inline(always)]
+    #[inline]
     fn add_assign(&mut self, rhs: Delta) {
         if 0 < rhs as i8 {
             self.0 <<= rhs as u8
@@ -263,10 +374,12 @@ impl std::ops::AddAssign<Delta> for Bitboard {
         }
     }
 }
+
+// [Sub] implementations (reverse shifts).
 impl std::ops::Sub<Delta> for Bitboard {
     type Output = Self;
 
-    #[inline(always)]
+    #[inline]
     fn sub(self, rhs: Delta) -> Self::Output {
         Self(if 0 < rhs as i8 {
             self.0 >> (rhs as u8)
@@ -276,7 +389,7 @@ impl std::ops::Sub<Delta> for Bitboard {
     }
 }
 impl std::ops::SubAssign<Delta> for Bitboard {
-    #[inline(always)]
+    #[inline]
     fn sub_assign(&mut self, rhs: Delta) {
         if 0 < rhs as i8 {
             self.0 >>= rhs as u8
@@ -286,30 +399,45 @@ impl std::ops::SubAssign<Delta> for Bitboard {
     }
 }
 
+/// Iterates over set squares in a [Bitboard]
 impl Iterator for Bitboard {
     type Item = Square;
 
-    #[inline(always)]
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.pop_lowest_set_square()
     }
 
-    #[inline(always)]
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let size = self.cardinality();
         (size as usize, Some(size as usize))
     }
 }
+/// Iterates over set squares top down.
 impl DoubleEndedIterator for Bitboard {
+    #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         self.pop_highest_set_square()
     }
 }
 impl FusedIterator for Bitboard {}
 impl ExactSizeIterator for Bitboard {
-    #[inline(always)]
+    #[inline]
     fn len(&self) -> usize {
         self.cardinality() as usize
+    }
+}
+
+impl std::fmt::Debug for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, square) in Square::squares_fen_iter().enumerate() {
+            if i % 8 == 0 && i != 0 {
+                writeln!(f)?
+            }
+            write!(f, "{} ", if self.is_set(square) { 'x' } else { '.' })?
+        }
+        Ok(())
     }
 }
 
