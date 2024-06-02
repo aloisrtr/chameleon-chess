@@ -248,7 +248,7 @@ fn find_magic(square: Square, orthogonal: bool) -> (u64, u64, u8) {
                 continue 'check;
             }
 
-            blockers = (blockers - blockers_mask) & blockers_mask;
+            blockers = blockers.wrapping_sub(blockers_mask) & blockers_mask;
             if blockers == 0 {
                 break 'blockers;
             }

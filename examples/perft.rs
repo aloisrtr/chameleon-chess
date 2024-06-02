@@ -12,7 +12,7 @@ struct Arguments {
     bulk_counting: bool,
     #[arg(short, long)]
     divide: bool,
-    #[arg(short, long)]
+    #[arg(long)]
     hash: bool,
     #[arg(short, long)]
     parallel: bool,

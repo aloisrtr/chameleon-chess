@@ -6,20 +6,14 @@ authors = ["Aloïs Rautureau <alois.rautureau@ens-rennes.fr>"]
 license = "MIT OR Apache 2.0"
 description = "A chess engine that adapts to its opponent."
 
-[[bin]]
-name = "magics"
-path = "src/bin/magics.rs"
-[[bin]]
-name = "perft"
-path = "src/bin/perft.rs"
-
 [dependencies]
 arrayvec = "0.7.4"
 const-random = "0.1.17"
 
-rand = { version = "0.8.5", features = ["small_rng"] }
+[dev-dependencies]
 clap = { version = "4.4.18", features = ["derive"] }
 rayon = "1.8.1"
+rand = { version = "0.8.5", features = ["small_rng"] }
 
 [profile.release]
 lto = true
