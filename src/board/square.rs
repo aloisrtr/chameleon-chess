@@ -1,5 +1,5 @@
 //! Enumerations of chessboard accessing constants, such as files, ranks and squares.
-use crate::bitboard::Bitboard;
+use super::bitboard::Bitboard;
 
 /// Files of a chessboard (A-H).
 #[repr(u8)]
@@ -32,7 +32,14 @@ impl File {
 
     /// A file from a given index.
     ///
-    /// Fails if the index is more than 7.
+    /// Returns [`None`] if the index is more than 7.
+    ///
+    /// # Exemple
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// assert_eq!(File::from_index(2), Some(File::C));
+    /// assert!(File::from_index(10).is_none());
+    /// ```
     #[inline]
     pub fn from_index(index: u8) -> Option<Self> {
         if index < 8 {
@@ -43,8 +50,15 @@ impl File {
     }
 
     /// A file from a given index.
+    ///
     /// # Safety
     /// If the index is more than 7, results in undefined behavior.
+    ///
+    /// # Exemple
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// assert_eq!(unsafe { File::from_index_unchecked(2) }, File::C);
+    /// ```
     #[inline]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
@@ -117,7 +131,15 @@ impl Rank {
 
     /// A rank from a given index.
     ///
-    /// Fails if the index is more than 7.
+    /// Returns [`None`] if the index is more than 7.
+    ///
+    /// # Exemple
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    ///
+    /// assert_eq!(Rank::from_index(4), Some(Rank::Five));
+    /// assert!(Rank::from_index(12).is_none());
+    /// ```
     #[inline]
     pub fn from_index(index: u8) -> Option<Self> {
         if index < 8 {
@@ -128,8 +150,15 @@ impl Rank {
     }
 
     /// A rank from a given index.
+    ///
     /// # Safety
     /// If the index is more than 7, results in undefined behavior.
+    ///
+    /// # Exemple
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// assert_eq!(unsafe { Rank::from_index_unchecked(4) },Rank::Five);
+    /// ```
     #[inline]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
@@ -219,6 +248,11 @@ pub enum Square {
 }
 impl Square {
     /// Instantiates a new square based on file and rank.
+    /// # Example
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// assert_eq!(Square::new(File::A, Rank::Four), Square::A4);
+    /// ```
     #[inline]
     pub const fn new(file: File, rank: Rank) -> Self {
         unsafe { std::mem::transmute((rank as u8) << 3 | (file as u8)) }
@@ -226,7 +260,13 @@ impl Square {
 
     /// Instantitates a new square from its index.
     ///
-    /// Returns `None` if the index is more than 63.
+    /// Returns [`None`] if the index is more than 63.
+    ///
+    /// # Example
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// assert_eq!(Square::from_index(4), Some(Square::E1));
+    /// ```
     #[inline]
     pub const fn from_index(index: u8) -> Option<Self> {
         if index < 64 {
@@ -237,6 +277,7 @@ impl Square {
     }
 
     /// Instantitates a new square from its index.
+    ///
     /// # Safety
     /// If the index is more than 63, causes undefined behavior.
     #[inline]
@@ -245,11 +286,22 @@ impl Square {
     }
 
     /// Returns the rank of the square.
+    /// # Example
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// assert_eq!(Square::A4.rank(), Rank::Four);
+    /// ```
     #[inline]
     pub const fn rank(self) -> Rank {
         unsafe { std::mem::transmute((self as u8) >> 3) }
     }
+
     /// Returns the file of the square.
+    /// # Example
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// assert_eq!(Square::A4.file(), File::A);
+    /// ```
     #[inline]
     pub const fn file(self) -> File {
         unsafe { std::mem::transmute((self as u8) & 7) }
@@ -257,7 +309,15 @@ impl Square {
 
     /// Translates this square by a given delta.
     ///
-    /// Returns `None` if the translation would go out of the board.
+    /// Returns [`None`] if the translation would go out of the board.
+    ///
+    /// # Example
+    /// ```
+    /// # use chameleon_chess::board::square::*;
+    /// let square = Square::E1;
+    /// assert_eq!(square.translate(Delta::North), Some(Square::E2));
+    /// assert!(square.translate(Delta::South).is_none());
+    /// ```
     #[inline]
     pub const fn translate(self, delta: Delta) -> Option<Self> {
         if match delta {
@@ -299,7 +359,8 @@ impl Square {
         (0..64).map(|i| unsafe { Square::from_index_unchecked(i) })
     }
 
-    /// An iterator over all square, ordered in big-endian rank/little-endian file.
+    /// An iterator over all square, ordered in big-endian rank/little-endian file
+    /// (equivalent to how squares are ordered in a FEN string).
     pub fn squares_fen_iter() -> impl Iterator<Item = Self> {
         (0..8).rev().flat_map(|rank| {
             (0..8).map(move |file| unsafe {
@@ -359,7 +420,7 @@ impl std::str::FromStr for Square {
 
 /// Deltas represent directions in which pieces can move.
 ///
-/// They can be added or subtracted to [Square]s to obtain the target of the
+/// They can be added or subtracted to a [`Square`] to obtain the target of the
 /// translation following this delta.
 #[repr(i8)]
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
@@ -406,8 +467,8 @@ impl Delta {
     ];
 }
 impl Delta {
-    pub const fn pawn_deltas(swapped: bool) -> (Self, Self, Self) {
-        if swapped {
+    pub(crate) const fn pawn_deltas(to_south: bool) -> (Self, Self, Self) {
+        if to_south {
             (Self::South, Self::SouthEast, Self::SouthWest)
         } else {
             (Self::North, Self::NorthEast, Self::NorthWest)

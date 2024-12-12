@@ -3,98 +3,38 @@
 //! This includes making, unmaking and generating moves, defining positions from
 //! FEN strings, etc.
 use std::hint::unreachable_unchecked;
+use thiserror::Error;
 
-use arrayvec::ArrayVec;
-
-use crate::{
+use super::{
+    action::{Action, LegalAction},
     bitboard::Bitboard,
+    colour::Colour,
+    history::HistoryEntry,
     lookup_tables::*,
-    r#move::{LegalMove, Move},
+    piece::PieceKind,
     square::{Delta, File, Rank, Square},
 };
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+// TODO: More precise errors
 pub struct IllegalMoveError;
 
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Error)]
 // TODO: Better FEN parsing error reports.
 /// FEN parsing errors.
 pub enum FenError {
+    #[error("Unexpected character at index {index}: {val}")]
     UnexpectedToken { index: usize, val: char },
-    Incomplete,
+    #[error("FEN string missing the {0} section")]
+    Incomplete(&'static str),
+    #[error("Found a non-ASCII character")]
     NonAscii,
+    #[error("Failed to parse")]
     ParseError,
-    IncompletePieceSection,
-}
-
-/// Records non-reversible informations that are lost when making a move.
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-struct HistoryEntry {
-    pub played: LegalMove,
-    pub captured: Option<PieceKind>,
-    pub castling_rights: u8,
-    pub reversible_moves: u8,
-    pub en_passant_file: Option<File>,
-    pub hash: u64,
-}
-
-/// Colors for each player.
-#[repr(u8)]
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub enum Color {
-    White = 0,
-    Black = 1,
-}
-impl Color {
-    /// Inverts the color.
-    #[inline]
-    pub fn invert(&mut self) {
-        *self = if *self == Color::Black {
-            Color::White
-        } else {
-            Color::Black
-        }
-    }
-}
-
-/// Existing types of pieces.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
-pub enum PieceKind {
-    Pawn = 0,
-    Knight = 1,
-    Bishop = 2,
-    Rook = 3,
-    Queen = 4,
-    King = 5,
-}
-impl PieceKind {
-    /// Checks if this piece kind is a diagonal slider.
-    #[inline(always)]
-    pub fn is_diagonal_slider(self) -> bool {
-        (self as u8 + 3) & 0b101 == 0b101
-    }
-    /// Checks if this piece kind is an orthogonal slider.
-    #[inline(always)]
-    pub fn is_orthogonal_slider(self) -> bool {
-        (self as u8 + 3) & 0b110 == 0b110
-    }
-}
-impl std::fmt::Display for PieceKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::Pawn => 'p',
-                Self::Knight => 'n',
-                Self::Bishop => 'b',
-                Self::Rook => 'r',
-                Self::Queen => 'q',
-                Self::King => 'k',
-            }
-        )
-    }
+    #[error("Piece section only defines {0} squares out of 8")]
+    IncompletePieceSection(u8),
+    #[error("The piece section defines too many squares")]
+    TooManySquares,
 }
 
 /// Represents a valid chess position and defines an API to interact with said
@@ -111,11 +51,11 @@ pub struct Position {
     occupancy_bitboard: Bitboard,
 
     // Metadata
-    side_to_move: Color,
+    side_to_move: Colour,
     castling_rights: u8,
     reversible_moves: u8,
     en_passant_file: Option<File>,
-    history: ArrayVec<HistoryEntry, 1024>,
+    history: Vec<HistoryEntry>,
     hash: u64,
 }
 impl Default for Position {
@@ -127,11 +67,11 @@ impl Default for Position {
             color_bitboards: [Bitboard::empty(); 2],
             occupancy_bitboard: Bitboard::empty(),
 
-            side_to_move: Color::White,
+            side_to_move: Colour::White,
             castling_rights: 0b1111,
             reversible_moves: 0,
             en_passant_file: None,
-            history: ArrayVec::new(),
+            history: Vec::new(),
             hash: 0,
         }
     }
@@ -159,39 +99,39 @@ impl Position {
         let mut position = Self::empty();
 
         let sections = fen.split_ascii_whitespace().collect::<Vec<_>>();
-        let pieces = sections.first().ok_or(FenError::Incomplete)?;
+        let pieces = sections.first().ok_or(FenError::Incomplete("pieces"))?;
         let mut squares = Square::squares_fen_iter();
         for c in pieces.chars() {
             let black = c.is_ascii_lowercase();
             unsafe {
                 match c.to_ascii_lowercase() {
                     'p' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::IncompletePieceSection)?,
+                        squares.next().ok_or(FenError::TooManySquares)?,
                         PieceKind::Pawn,
                         black,
                     ),
                     'n' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::IncompletePieceSection)?,
+                        squares.next().ok_or(FenError::TooManySquares)?,
                         PieceKind::Knight,
                         black,
                     ),
                     'b' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::IncompletePieceSection)?,
+                        squares.next().ok_or(FenError::TooManySquares)?,
                         PieceKind::Bishop,
                         black,
                     ),
                     'r' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::IncompletePieceSection)?,
+                        squares.next().ok_or(FenError::TooManySquares)?,
                         PieceKind::Rook,
                         black,
                     ),
                     'q' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::IncompletePieceSection)?,
+                        squares.next().ok_or(FenError::TooManySquares)?,
                         PieceKind::Queen,
                         black,
                     ),
                     'k' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::IncompletePieceSection)?,
+                        squares.next().ok_or(FenError::TooManySquares)?,
                         PieceKind::King,
                         black,
                     ),
@@ -213,11 +153,14 @@ impl Position {
             }
         }
 
-        position.side_to_move = match *sections.get(1).ok_or(FenError::Incomplete)? {
-            "w" => Color::White,
+        position.side_to_move = match *sections
+            .get(1)
+            .ok_or(FenError::Incomplete("Side to move"))?
+        {
+            "w" => Colour::White,
             "b" => {
                 position.hash ^= Self::side_to_move_hash();
-                Color::Black
+                Colour::Black
             }
             _ => return Err(FenError::UnexpectedToken { index: 0, val: '0' }),
         };
@@ -225,7 +168,11 @@ impl Position {
         position.castling_rights = {
             let mut rights = 0;
             let mut empty = false;
-            for c in sections.get(2).ok_or(FenError::Incomplete)?.chars() {
+            for c in sections
+                .get(2)
+                .ok_or(FenError::Incomplete("Castling Rights"))?
+                .chars()
+            {
                 match c {
                     'k' => {
                         position.hash ^= Self::kingside_right_hash::<true>();
@@ -254,17 +201,18 @@ impl Position {
             rights
         };
 
-        position.en_passant_file = match *sections.get(3).ok_or(FenError::Incomplete)? {
-            "-" => None,
-            s => {
-                let file = s
-                    .parse::<Square>()
-                    .map_err(|_| FenError::ParseError)?
-                    .file();
-                position.hash ^= Self::en_passant_file_hash(file);
-                Some(file)
-            }
-        };
+        position.en_passant_file =
+            match *sections.get(3).ok_or(FenError::Incomplete("En passant"))? {
+                "-" => None,
+                s => {
+                    let file = s
+                        .parse::<Square>()
+                        .map_err(|_| FenError::ParseError)?
+                        .file();
+                    position.hash ^= Self::en_passant_file_hash(file);
+                    Some(file)
+                }
+            };
 
         position.reversible_moves = sections.get(4).unwrap_or(&"0").parse().unwrap();
 
@@ -273,16 +221,101 @@ impl Position {
 
     /// Returns a FEN string describing the position.
     pub fn fen(&self) -> String {
-        todo!()
+        let mut pieces = String::new();
+
+        // Pieces
+        let mut skip = 0;
+        let mut line_length = 0;
+        for sq in Square::squares_fen_iter() {
+            if let Some((piece, colour)) = self.piece_on(sq) {
+                if skip != 0 {
+                    pieces.push(char::from_digit(skip, 10).unwrap());
+                    skip = 0
+                }
+                let mut p = match piece {
+                    PieceKind::Pawn => 'p',
+                    PieceKind::Knight => 'n',
+                    PieceKind::Bishop => 'b',
+                    PieceKind::Rook => 'r',
+                    PieceKind::Queen => 'q',
+                    PieceKind::King => 'k',
+                };
+                if colour == Colour::White {
+                    p = p.to_ascii_uppercase();
+                }
+
+                pieces.push(p)
+            } else {
+                skip += 1
+            }
+
+            line_length = (line_length + 1) % 8;
+            if line_length == 0 {
+                if skip != 0 {
+                    pieces.push(char::from_digit(skip, 10).unwrap());
+                    skip = 0;
+                }
+                if sq.rank() != Rank::One {
+                    pieces.push('/');
+                }
+            }
+        }
+
+        format!(
+            "{pieces} {} {}{}{}{} {} {} {}",
+            if self.side_to_move.is_black() {
+                'b'
+            } else {
+                'w'
+            },
+            if self.castling_rights & 0b0001 != 0 {
+                "k"
+            } else {
+                ""
+            },
+            if self.castling_rights & 0b0010 != 0 {
+                "q"
+            } else {
+                ""
+            },
+            if self.castling_rights & 0b0100 != 0 {
+                "K"
+            } else {
+                ""
+            },
+            if self.castling_rights & 0b1000 != 0 {
+                "Q"
+            } else if self.castling_rights == 0 {
+                "-"
+            } else {
+                ""
+            },
+            if let Some(ep) = self.en_passant_file {
+                Square::new(
+                    ep,
+                    if self.side_to_move.is_white() {
+                        Rank::Six
+                    } else {
+                        Rank::Three
+                    },
+                )
+                .to_string()
+            } else {
+                String::from("-")
+            },
+            self.reversible_moves,
+            (self.history.len() + 1) / 2
+        )
     }
 
     /// Adds a piece on the board on the given square.
     /// # Safety
     /// Placing a piece on an occupied square will result in undefined behavior.
     pub unsafe fn add_piece_unchecked(&mut self, on: Square, kind: PieceKind, black: bool) {
-        self.piece_bitboards[kind as usize] |= on.bitboard();
-        self.color_bitboards[black as usize] |= on.bitboard();
-        self.occupancy_bitboard |= on.bitboard();
+        let bb = on.bitboard();
+        self.piece_bitboards[kind as usize] |= bb;
+        self.color_bitboards[black as usize] |= bb;
+        self.occupancy_bitboard |= bb;
         self.pieces[on as usize] = Some(kind);
 
         self.hash ^= if black {
@@ -293,8 +326,17 @@ impl Position {
     }
 
     /// Returns the piece kind and color sitting on a given square if any.
-    pub fn piece_on(&self, square: Square) -> Option<(PieceKind, bool)> {
-        self.pieces[square as usize].map(|kind| (kind, self.color_bitboards[1].is_set(square)))
+    pub fn piece_on(&self, square: Square) -> Option<(PieceKind, Colour)> {
+        self.pieces[square as usize].map(|kind| {
+            (
+                kind,
+                if self.color_bitboards[1].is_set(square) {
+                    Colour::Black
+                } else {
+                    Colour::White
+                },
+            )
+        })
     }
 
     /// Makes a move on the board, modifying the position.
@@ -302,16 +344,16 @@ impl Position {
     /// This function returns an error if the move is illegal.
     pub fn make(
         &mut self,
-        Move {
+        Action {
             origin,
             target,
             promotion,
-        }: Move,
+        }: Action,
     ) -> Result<(), IllegalMoveError> {
-        if let Some(&mv) = self.moves().iter().find(|mv| {
+        if let Some(&mv) = self.actions().iter().find(|mv| {
             mv.origin() == origin && mv.target() == target && mv.is_promotion() == promotion
         }) {
-            unsafe { self.make_unchecked(mv) };
+            self.make_legal(mv);
             Ok(())
         } else {
             Err(IllegalMoveError)
@@ -319,18 +361,12 @@ impl Position {
     }
 
     /// Makes a move on the board, modifying the position.
-    /// # Safety
-    /// Trying to play an illegal move will result in undefined behavior as it will
-    /// mess up invariants of the inner board representation.
-    ///
-    /// As a general rule of thumb, only use this function with moves generated
-    /// from the position as they are guaranteed to be legal.
     #[inline]
-    pub unsafe fn make_unchecked(&mut self, mv: LegalMove) {
+    pub fn make_legal(&mut self, mv: LegalAction) {
         #[inline(always)]
         unsafe fn make_unchecked_generic<const BLACK_TO_MOVE: bool>(
             position: &mut Position,
-            mv: LegalMove,
+            mv: LegalAction,
         ) {
             let origin = mv.origin();
             let target = mv.target();
@@ -342,7 +378,7 @@ impl Position {
             let us_index = BLACK_TO_MOVE as usize;
             let them_index = !BLACK_TO_MOVE as usize;
 
-            position.history.push_unchecked(HistoryEntry {
+            position.history.push(HistoryEntry {
                 played: mv,
                 captured: *position.pieces.get_unchecked(target as usize),
                 castling_rights: position.castling_rights,
@@ -473,10 +509,12 @@ impl Position {
             position.hash ^= Position::side_to_move_hash();
         }
 
-        if self.side_to_move == Color::Black {
-            make_unchecked_generic::<true>(self, mv);
-        } else {
-            make_unchecked_generic::<false>(self, mv);
+        unsafe {
+            if self.side_to_move == Colour::Black {
+                make_unchecked_generic::<true>(self, mv);
+            } else {
+                make_unchecked_generic::<false>(self, mv);
+            }
         }
     }
 
@@ -506,9 +544,9 @@ impl Position {
             position.reversible_moves = reversible_moves;
             position.en_passant_file = en_passant_file;
             position.side_to_move = if BLACK_TO_MOVE {
-                Color::Black
+                Colour::Black
             } else {
-                Color::White
+                Colour::White
             };
             position.hash = hash;
 
@@ -596,7 +634,7 @@ impl Position {
 
         if let Some(history_entry) = self.history.pop() {
             unsafe {
-                if self.side_to_move == Color::Black {
+                if self.side_to_move == Colour::Black {
                     unmake_generic::<false>(self, history_entry)
                 } else {
                     unmake_generic::<true>(self, history_entry)
@@ -608,12 +646,12 @@ impl Position {
     /// Generates a list of legal moves in the current position.
     ///
     /// If this function returns an empty list, the side to move is in checkmate.
-    pub fn moves(&self) -> ArrayVec<LegalMove, 256> {
+    pub fn actions(&self) -> heapless::Vec<LegalAction, 256> {
         #[inline(always)]
         unsafe fn moves_generic<const BLACK_TO_MOVE: bool>(
             position: &Position,
-        ) -> ArrayVec<LegalMove, 256> {
-            let mut moves = ArrayVec::new();
+        ) -> heapless::Vec<LegalAction, 256> {
+            let mut moves = heapless::Vec::new();
 
             // Initialize some generally useful constants.
             let us_index = BLACK_TO_MOVE as usize;
@@ -743,10 +781,10 @@ impl Position {
                             .unwrap_unchecked()
                             .is_diagonal_slider()
                         {
-                            moves.extend(
-                                movable_ray.map(|t| LegalMove::new_quiet(pinned_square, t)),
-                            );
-                            moves.push_unchecked(LegalMove::new_capture(pinned_square, origin))
+                            for m in movable_ray.map(|t| LegalAction::new_quiet(pinned_square, t)) {
+                                moves.push_unchecked(m)
+                            }
+                            moves.push_unchecked(LegalAction::new_capture(pinned_square, origin))
                         }
                         // If the pinned piece is a pawn, it can only capture the piece directly
                         // or capture en passant. Note that captures can be promotions.
@@ -757,12 +795,13 @@ impl Position {
                             {
                                 // Promotion capture
                                 if pinned.intersects(promotion_rank) {
-                                    moves.extend(LegalMove::new_promotion_capture(
-                                        pinned_square,
-                                        origin,
-                                    ))
+                                    for m in
+                                        LegalAction::new_promotion_capture(pinned_square, origin)
+                                    {
+                                        moves.push_unchecked(m)
+                                    }
                                 } else {
-                                    moves.push_unchecked(LegalMove::new_capture(
+                                    moves.push_unchecked(LegalAction::new_capture(
                                         pinned_square,
                                         origin,
                                     ))
@@ -786,7 +825,8 @@ impl Position {
                                     | ((captured & !File::A.bitboard()) + Delta::West);
 
                                 if movable_ray.is_set(target) && capturers.is_set(pinned_square) {
-                                    moves.push_unchecked(LegalMove::new_en_passant(origin, target))
+                                    moves
+                                        .push_unchecked(LegalAction::new_en_passant(origin, target))
                                 }
                             }
                         }
@@ -829,22 +869,22 @@ impl Position {
                             .unwrap_unchecked()
                             .is_orthogonal_slider()
                         {
-                            moves.extend(
-                                movable_ray.map(|t| LegalMove::new_quiet(pinned_square, t)),
-                            );
-                            moves.push_unchecked(LegalMove::new_capture(pinned_square, origin))
+                            for m in movable_ray.map(|t| LegalAction::new_quiet(pinned_square, t)) {
+                                moves.push_unchecked(m)
+                            }
+                            moves.push_unchecked(LegalAction::new_capture(pinned_square, origin))
                         }
                         // If the pinned piece is a pawn, it can only push or double push
                         // if its on its original square.
                         else if position.pieces[pinned_square as usize] == Some(PieceKind::Pawn) {
                             let single_push = pinned + pawn_push;
                             if let Some(target) = (single_push & movable_ray).next() {
-                                moves.push(LegalMove::new_quiet(pinned_square, target));
+                                moves.push_unchecked(LegalAction::new_quiet(pinned_square, target));
                                 if let Some(target) =
                                     (((single_push & double_push_rank) + pawn_push) & movable_ray)
                                         .lowest_set_square()
                                 {
-                                    moves.push_unchecked(LegalMove::new_double_push(
+                                    moves.push_unchecked(LegalAction::new_double_push(
                                         pinned_square,
                                         target,
                                     ))
@@ -870,10 +910,10 @@ impl Position {
                 movable = !position.occupancy_bitboard;
 
                 if position.queenside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
-                    moves.push_unchecked(LegalMove::new_queenside_castle::<BLACK_TO_MOVE>())
+                    moves.push_unchecked(LegalAction::new_queenside_castle::<BLACK_TO_MOVE>())
                 }
                 if position.kingside_castle_allowed::<BLACK_TO_MOVE>(attacked) {
-                    moves.push_unchecked(LegalMove::new_kingside_castle::<BLACK_TO_MOVE>())
+                    moves.push_unchecked(LegalAction::new_kingside_castle::<BLACK_TO_MOVE>())
                 }
             }
 
@@ -886,41 +926,48 @@ impl Position {
 
                 let single_push_targets = (pawns + pawn_push) & !position.occupancy_bitboard;
                 let single_push_origins = (single_push_targets & movable) - pawn_push;
-                moves.extend(
-                    single_push_origins
-                        .zip(single_push_targets & movable)
-                        .map(|(o, t)| LegalMove::new_quiet(o, t)),
-                );
+                for m in single_push_origins
+                    .zip(single_push_targets & movable)
+                    .map(|(o, t)| LegalAction::new_quiet(o, t))
+                {
+                    moves.push_unchecked(m)
+                }
                 let double_push_targets =
                     ((single_push_targets & double_push_rank) + pawn_push) & movable;
                 let double_push_origins = double_push_targets - pawn_push - pawn_push;
-                moves.extend(
-                    double_push_origins
-                        .zip(double_push_targets)
-                        .map(|(o, t)| LegalMove::new_double_push(o, t)),
-                );
+                for m in double_push_origins
+                    .zip(double_push_targets)
+                    .map(|(o, t)| LegalAction::new_double_push(o, t))
+                {
+                    moves.push_unchecked(m)
+                }
 
                 let east_captures_targets =
                     ((pawns & !File::H.bitboard()) + pawn_east_attack) & capturable;
                 let east_captures_origins = east_captures_targets - pawn_east_attack;
-                moves.extend(
-                    east_captures_origins
-                        .zip(east_captures_targets)
-                        .map(|(o, t)| LegalMove::new_capture(o, t)),
-                );
+
+                for m in east_captures_origins
+                    .zip(east_captures_targets)
+                    .map(|(o, t)| LegalAction::new_capture(o, t))
+                {
+                    moves.push_unchecked(m)
+                }
                 let west_captures_targets =
                     ((pawns & !File::A.bitboard()) + pawn_west_attack) & capturable;
                 let west_captures_origins = west_captures_targets - pawn_west_attack;
-                moves.extend(
-                    west_captures_origins
-                        .zip(west_captures_targets)
-                        .map(|(o, t)| LegalMove::new_capture(o, t)),
-                );
+                for m in west_captures_origins
+                    .zip(west_captures_targets)
+                    .map(|(o, t)| LegalAction::new_capture(o, t))
+                {
+                    moves.push_unchecked(m)
+                }
 
                 let promoting_push_targets = (promoting_pawns + pawn_push) & movable;
                 let promoting_push_origins = promoting_push_targets - pawn_push;
                 for (origin, target) in promoting_push_origins.zip(promoting_push_targets) {
-                    moves.extend(LegalMove::new_promotion(origin, target))
+                    for m in LegalAction::new_promotion(origin, target) {
+                        moves.push_unchecked(m)
+                    }
                 }
                 let promoting_east_captures_targets =
                     ((promoting_pawns & !File::H.bitboard()) + pawn_east_attack) & capturable;
@@ -929,7 +976,9 @@ impl Position {
                 for (origin, target) in
                     promoting_east_captures_origins.zip(promoting_east_captures_targets)
                 {
-                    moves.extend(LegalMove::new_promotion_capture(origin, target))
+                    for m in LegalAction::new_promotion_capture(origin, target) {
+                        moves.push_unchecked(m)
+                    }
                 }
                 let promoting_west_captures_targets =
                     ((promoting_pawns & !File::A.bitboard()) + pawn_west_attack) & capturable;
@@ -938,7 +987,9 @@ impl Position {
                 for (origin, target) in
                     promoting_west_captures_origins.zip(promoting_west_captures_targets)
                 {
-                    moves.extend(LegalMove::new_promotion_capture(origin, target))
+                    for m in LegalAction::new_promotion_capture(origin, target) {
+                        moves.push_unchecked(m)
+                    }
                 }
 
                 // En passant is a bit tricky as it can leave the king in check.
@@ -968,7 +1019,7 @@ impl Position {
                             .intersects(ennemy_orthogonals)
                         {
                             if let Some(origin) = east_attacker.lowest_set_square() {
-                                moves.push_unchecked(LegalMove::new_en_passant(origin, target))
+                                moves.push_unchecked(LegalAction::new_en_passant(origin, target))
                             }
                         }
                         // Same for west attacks
@@ -979,7 +1030,7 @@ impl Position {
                             .intersects(ennemy_orthogonals)
                         {
                             if let Some(origin) = west_attacker.lowest_set_square() {
-                                moves.push_unchecked(LegalMove::new_en_passant(origin, target))
+                                moves.push_unchecked(LegalAction::new_en_passant(origin, target))
                             }
                         }
                     }
@@ -989,10 +1040,14 @@ impl Position {
                 let knights = position.piece_bitboards[PieceKind::Knight as usize] & us;
                 for origin in knights {
                     let knight_moves = knight_moves(origin);
-                    moves.extend((knight_moves & movable).map(|t| LegalMove::new_quiet(origin, t)));
-                    moves.extend(
-                        (knight_moves & capturable).map(|t| LegalMove::new_capture(origin, t)),
-                    );
+                    for m in (knight_moves & movable).map(|t| LegalAction::new_quiet(origin, t)) {
+                        moves.push_unchecked(m)
+                    }
+                    for m in
+                        (knight_moves & capturable).map(|t| LegalAction::new_capture(origin, t))
+                    {
+                        moves.push_unchecked(m)
+                    }
                 }
 
                 // Sliding pieces
@@ -1001,12 +1056,14 @@ impl Position {
                     & us;
                 for origin in diagonal_sliders {
                     let diagonal_moves = diagonal_moves(origin, position.occupancy_bitboard);
-                    moves.extend(
-                        (diagonal_moves & movable).map(|t| LegalMove::new_quiet(origin, t)),
-                    );
-                    moves.extend(
-                        (diagonal_moves & capturable).map(|t| LegalMove::new_capture(origin, t)),
-                    );
+                    for m in (diagonal_moves & movable).map(|t| LegalAction::new_quiet(origin, t)) {
+                        moves.push_unchecked(m)
+                    }
+                    for m in
+                        (diagonal_moves & capturable).map(|t| LegalAction::new_capture(origin, t))
+                    {
+                        moves.push_unchecked(m)
+                    }
                 }
 
                 let orthogonal_sliders = (position.piece_bitboards[PieceKind::Rook as usize]
@@ -1014,28 +1071,35 @@ impl Position {
                     & us;
                 for origin in orthogonal_sliders {
                     let orthogonal_moves = orthogonal_moves(origin, position.occupancy_bitboard);
-                    moves.extend(
-                        (orthogonal_moves & movable).map(|t| LegalMove::new_quiet(origin, t)),
-                    );
-                    moves.extend(
-                        (orthogonal_moves & capturable).map(|t| LegalMove::new_capture(origin, t)),
-                    );
+
+                    for m in (orthogonal_moves & movable).map(|t| LegalAction::new_quiet(origin, t))
+                    {
+                        moves.push_unchecked(m)
+                    }
+                    for m in
+                        (orthogonal_moves & capturable).map(|t| LegalAction::new_capture(origin, t))
+                    {
+                        moves.push_unchecked(m)
+                    }
                 }
             }
 
             // We always generate king moves.
             let king_moves = king_moves(king_square) & !attacked;
-            moves.extend(
-                (king_moves & !position.occupancy_bitboard)
-                    .map(|t| LegalMove::new_quiet(king_square, t)),
-            );
-            moves.extend((king_moves & them).map(|t| LegalMove::new_capture(king_square, t)));
+            for m in (king_moves & !position.occupancy_bitboard)
+                .map(|t| LegalAction::new_quiet(king_square, t))
+            {
+                moves.push_unchecked(m)
+            }
+            for m in (king_moves & them).map(|t| LegalAction::new_capture(king_square, t)) {
+                moves.push_unchecked(m)
+            }
 
             moves
         }
 
         unsafe {
-            if self.side_to_move == Color::Black {
+            if self.side_to_move == Colour::Black {
                 moves_generic::<true>(self)
             } else {
                 moves_generic::<false>(self)
@@ -1091,109 +1155,43 @@ impl Position {
     // 3124 bytes for aligned access.
     #[inline(always)]
     const fn piece_hash<const BLACK_PIECE: bool>(kind: PieceKind, square: Square) -> u64 {
-        const WHITE_PIECES_HASH: *const u8 = Position::ZOBRIST_KEYS.as_ptr().cast();
-        const BLACK_PIECES_HASH: *const u8 = unsafe {
-            Position::ZOBRIST_KEYS
-                .as_ptr()
-                .cast::<u8>()
-                .offset((64 * 6) as isize)
-        };
-        unsafe {
-            let piece_offset = kind as isize * square as isize;
-            if BLACK_PIECE {
-                BLACK_PIECES_HASH
-                    .offset(piece_offset)
-                    .cast::<u64>()
-                    .read_unaligned()
-            } else {
-                WHITE_PIECES_HASH
-                    .offset(piece_offset)
-                    .cast::<u64>()
-                    .read_unaligned()
-            }
+        let piece_offset = kind as usize * square as usize;
+        if BLACK_PIECE {
+            Position::ZOBRIST_KEYS[piece_offset + 64 * 6]
+        } else {
+            Position::ZOBRIST_KEYS[piece_offset]
         }
     }
     #[inline(always)]
     const fn side_to_move_hash() -> u64 {
-        const SIDE_TO_MOVE_HASH: *const u64 = unsafe {
-            Position::ZOBRIST_KEYS
-                .as_ptr()
-                .cast::<u8>()
-                .offset((64 * 12) as isize)
-                .cast()
-        };
-        unsafe { SIDE_TO_MOVE_HASH.read_unaligned() }
+        Position::ZOBRIST_KEYS[64 * 12]
     }
     #[inline(always)]
     const fn queenside_right_hash<const BLACK: bool>() -> u64 {
-        const QUEENSIDE_RIGHT_WHITE_HASH: *const u64 = unsafe {
-            Position::ZOBRIST_KEYS
-                .as_ptr()
-                .cast::<u8>()
-                .offset((64 * 12 + 1) as isize)
-                .cast()
-        };
-        const QUEENSIDE_RIGHT_BLACK_HASH: *const u64 = unsafe {
-            Position::ZOBRIST_KEYS
-                .as_ptr()
-                .cast::<u8>()
-                .offset((64 * 12 + 3) as isize)
-                .cast()
-        };
-        unsafe {
-            if BLACK {
-                QUEENSIDE_RIGHT_BLACK_HASH.read_unaligned()
-            } else {
-                QUEENSIDE_RIGHT_WHITE_HASH.read_unaligned()
-            }
+        if BLACK {
+            Position::ZOBRIST_KEYS[64 * 12 + 3]
+        } else {
+            Position::ZOBRIST_KEYS[64 * 12 + 1]
         }
     }
     #[inline(always)]
     const fn kingside_right_hash<const BLACK: bool>() -> u64 {
-        const KINGSIDE_RIGHT_WHITE_HASH: *const u64 = unsafe {
-            Position::ZOBRIST_KEYS
-                .as_ptr()
-                .cast::<u8>()
-                .offset((64 * 12 + 2) as isize)
-                .cast()
-        };
-        const KINGSIDE_RIGHT_BLACK_HASH: *const u64 = unsafe {
-            Position::ZOBRIST_KEYS
-                .as_ptr()
-                .cast::<u8>()
-                .offset((64 * 12 + 4) as isize)
-                .cast()
-        };
-        unsafe {
-            if BLACK {
-                KINGSIDE_RIGHT_BLACK_HASH.read_unaligned()
-            } else {
-                KINGSIDE_RIGHT_WHITE_HASH.read_unaligned()
-            }
+        if BLACK {
+            Position::ZOBRIST_KEYS[64 * 12 + 4]
+        } else {
+            Position::ZOBRIST_KEYS[64 * 12 + 2]
         }
     }
     #[inline(always)]
     const fn en_passant_file_hash(file: File) -> u64 {
-        const EN_PASSANT_FILE_HASH: *const u8 = unsafe {
-            Position::ZOBRIST_KEYS
-                .as_ptr()
-                .cast::<u8>()
-                .offset((64 * 12 + 5) as isize)
-                .cast()
-        };
-        unsafe {
-            EN_PASSANT_FILE_HASH
-                .offset(file as isize)
-                .cast::<u64>()
-                .read_unaligned()
-        }
+        Position::ZOBRIST_KEYS[64 * 12 + 5 + file as usize]
     }
 
-    const ZOBRIST_KEYS: [u64; 196] = {
-        let mut result = [0; 196];
+    const ZOBRIST_KEYS: [u64; 781] = {
+        let mut result = [0; 781];
 
         let mut i = 0;
-        while i < 196 {
+        while i < 781 {
             result[i] = const_random::const_random!(u64);
             i += 1
         }
@@ -1214,7 +1212,7 @@ impl std::fmt::Display for Position {
                     3 => writeln!(
                         f,
                         "side to move: {}",
-                        if self.side_to_move == Color::Black {
+                        if self.side_to_move == Colour::Black {
                             "black"
                         } else {
                             "white"
@@ -1264,8 +1262,8 @@ impl std::fmt::Display for Position {
                 "{} ",
                 match self.piece_on(square) {
                     None => ".".to_string(),
-                    Some((kind, black)) =>
-                        if black {
+                    Some((kind, color)) =>
+                        if color == Colour::Black {
                             kind.to_string()
                         } else {
                             kind.to_string().to_uppercase()
@@ -1273,6 +1271,7 @@ impl std::fmt::Display for Position {
                 }
             )?
         }
-        Ok(())
+
+        writeln!(f, "\nfen: {}", self.fen())
     }
 }

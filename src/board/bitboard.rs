@@ -3,7 +3,7 @@
 
 use std::{iter::FusedIterator, u8};
 
-use crate::square::{Delta, Square};
+use super::square::{Delta, Square};
 
 /// Bitboards are data structures used to efficiently represent the board state.
 ///
@@ -443,7 +443,7 @@ impl std::fmt::Debug for Bitboard {
 
 #[cfg(test)]
 mod test {
-    use crate::{bitboard::Bitboard, square::Delta};
+    use super::{super::square::Delta, Bitboard};
 
     #[test]
     fn shift_test() {

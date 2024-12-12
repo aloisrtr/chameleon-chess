@@ -5,11 +5,7 @@
 //! It is usable as both a library to embed into your own projects and a standalone
 //! binary for analysis or competitions.
 
-pub mod bitboard;
-mod lookup_tables;
-pub mod r#move;
-pub mod position;
-pub mod square;
-
-#[cfg(test)]
-mod tests;
+pub mod board;
+// pub mod brain;
+pub mod protocols;
+// pub mod search;

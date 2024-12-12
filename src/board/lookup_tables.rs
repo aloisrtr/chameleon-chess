@@ -1,6 +1,7 @@
+//! Lookup tables for stuff like magic bitboards, knight moves, etc
 use std::mem::MaybeUninit;
 
-use crate::{
+use super::{
     bitboard::Bitboard,
     square::{Delta, File, Square},
 };
