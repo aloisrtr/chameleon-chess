@@ -6,7 +6,7 @@ use crate::board::action::Action;
 use std::{
     collections::BTreeMap,
     convert::Infallible,
-    num::{NonZeroU16, NonZeroU64},
+    num::{NonZeroU64, NonZeroU8},
     time::Duration,
 };
 
@@ -32,7 +32,7 @@ pub enum UciCommand {
         fen: Option<String>,
         moves: Vec<Action>,
     },
-    StartSearch(UciSearchParametersBuilder),
+    StartSearch(UciSearchParameters),
     StopSearch,
 
     PonderHit,
@@ -84,6 +84,7 @@ impl std::str::FromStr for UciCommand {
 
     /// Parses a UCI command in string format.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
         let tokens = s.split_whitespace();
         let mut verb = "";
         let mut parameter_name = "";
@@ -185,14 +186,14 @@ impl std::str::FromStr for UciCommand {
             }
             "position" => {
                 let fen = String::from_str(&parameters.get("fen").ok_or(())?.join(" ")).unwrap();
-                let moves = parameters.get("moves").ok_or(())?;
+                let moves = parameters.get("moves").cloned().unwrap_or(vec![]);
                 UciCommand::SetPosition {
                     fen: if fen.is_empty() { None } else { Some(fen) },
                     moves: moves.iter().filter_map(|m| m.parse().ok()).collect(),
                 }
             }
             "go" => {
-                let search_parameters = UciSearchParametersBuilder::default()
+                let search_parameters = UciSearchParameters::default()
                     .with_available_moves(
                         &parameters
                             .get("searchmoves")
@@ -299,6 +300,7 @@ pub enum UciMessage {
     RegistrationCheck,
     RegistrationStatus(bool),
     Information(Vec<UciInformation>),
+    Debug(String),
     Option(UciOption),
 }
 impl std::fmt::Display for UciMessage {
@@ -334,6 +336,7 @@ impl std::fmt::Display for UciMessage {
                     .iter()
                     .fold(String::new(), |acc, info| format!("{acc} {info}"))
             ),
+            Self::Debug(msg) => writeln!(f, "info string {msg}"),
             Self::Option(option) => writeln!(
                 f,
                 "option name {} type {}",
@@ -364,21 +367,21 @@ impl std::fmt::Display for UciMessage {
 
 /// A builder to create clean parameters of search from the server to the engine.
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
-pub struct UciSearchParametersBuilder {
-    available_moves: Vec<Action>,
-    ponder: bool,
-    white_time: Option<Duration>,
-    black_time: Option<Duration>,
-    white_increment: Option<Duration>,
-    black_increment: Option<Duration>,
-    moves_until_time_control: Option<NonZeroU16>,
-    depth: Option<NonZeroU16>,
-    nodes: Option<NonZeroU64>,
-    distance_to_mate: Option<NonZeroU16>,
-    search_time: Option<Duration>,
-    infinite: bool,
+pub struct UciSearchParameters {
+    pub(crate) available_moves: Vec<Action>,
+    pub(crate) ponder: bool,
+    pub(crate) white_time: Option<Duration>,
+    pub(crate) black_time: Option<Duration>,
+    pub(crate) white_increment: Option<Duration>,
+    pub(crate) black_increment: Option<Duration>,
+    pub(crate) moves_until_time_control: Option<NonZeroU8>,
+    pub(crate) depth: Option<NonZeroU8>,
+    pub(crate) nodes: Option<NonZeroU64>,
+    pub(crate) distance_to_mate: Option<NonZeroU8>,
+    pub(crate) search_time: Option<Duration>,
+    pub(crate) infinite: bool,
 }
-impl UciSearchParametersBuilder {
+impl UciSearchParameters {
     pub fn new() -> Self {
         Self::default()
     }
@@ -390,8 +393,12 @@ impl UciSearchParametersBuilder {
         self.ponder = ponder;
         self
     }
-    pub fn with_white_time(mut self, time: Duration) -> Self {
+    pub fn with_time_constraint(mut self, time: Duration) -> Self {
         self.white_time = if time.is_zero() { None } else { Some(time) };
+        self
+    }
+    pub fn with_white_time(mut self, time: Duration) -> Self {
+        self.black_time = if time.is_zero() { None } else { Some(time) };
         self
     }
     pub fn with_black_time(mut self, time: Duration) -> Self {
@@ -414,16 +421,16 @@ impl UciSearchParametersBuilder {
         };
         self
     }
-    pub fn with_moves_until_time_control(mut self, moves: u16) -> Self {
-        if let Some(moves) = NonZeroU16::new(moves) {
+    pub fn with_moves_until_time_control(mut self, moves: u8) -> Self {
+        if let Some(moves) = NonZeroU8::new(moves) {
             self.moves_until_time_control = Some(moves)
         } else {
             self.moves_until_time_control = None
         }
         self
     }
-    pub fn with_depth(mut self, depth: u16) -> Self {
-        if let Some(depth) = NonZeroU16::new(depth) {
+    pub fn with_depth(mut self, depth: u8) -> Self {
+        if let Some(depth) = NonZeroU8::new(depth) {
             self.depth = Some(depth)
         } else {
             self.depth = None
@@ -438,8 +445,8 @@ impl UciSearchParametersBuilder {
         }
         self
     }
-    pub fn with_distance_to_mate(mut self, distance: u16) -> Self {
-        if let Some(distance) = NonZeroU16::new(distance) {
+    pub fn with_distance_to_mate(mut self, distance: u8) -> Self {
+        if let Some(distance) = NonZeroU8::new(distance) {
             self.distance_to_mate = Some(distance)
         } else {
             self.distance_to_mate = None
@@ -510,7 +517,7 @@ pub enum UciInformation {
     SearchTime(Duration),
     SearchedNodes(u64),
     PrincipalVariation {
-        ranking: u8,
+        ranking: Option<u8>,
         moves: Vec<Action>,
     },
     CentipawnScore {
@@ -523,7 +530,7 @@ pub enum UciInformation {
     },
 
     CurrentlySearchedMove {
-        move_index: u8,
+        move_index: Option<u8>,
         mv: Action,
     },
     HashTableFill(f32),
@@ -548,14 +555,16 @@ impl std::fmt::Display for UciInformation {
             Self::SelectiveDepth(depth) => write!(f, "seldepth {depth}"),
             Self::SearchTime(duration) => write!(f, "time {}", duration.as_millis()),
             Self::SearchedNodes(nodes) => write!(f, "nodes {nodes}"),
-            Self::PrincipalVariation { ranking, moves } => write!(
-                f,
-                "multipv {} pv{}",
-                ranking + 1,
-                moves
-                    .iter()
-                    .fold(String::new(), |acc, m| format!("{acc} {m}"))
-            ),
+            Self::PrincipalVariation { ranking, moves } => {
+                if let Some(ranking) = ranking {
+                    write!(f, "multipv {} ", ranking + 1)?
+                }
+                write!(f, "pv")?;
+                for action in moves.iter() {
+                    write!(f, " {action}")?
+                }
+                Ok(())
+            }
             Self::CentipawnScore {
                 centipawns,
                 is_upper_bound,
@@ -589,7 +598,10 @@ impl std::fmt::Display for UciInformation {
                 }
             ),
             Self::CurrentlySearchedMove { move_index, mv } => {
-                write!(f, "currmovenumber {} currmove {mv}", move_index + 1)
+                if let Some(index) = move_index {
+                    write!(f, "currmovenumber {} ", index + 1)?
+                }
+                write!(f, "currmove {mv}")
             }
             Self::HashTableFill(percent) => write!(f, "hashfull {}", (percent * 10000f32) as u16),
             Self::SearchSpeed(nps) => write!(f, "nps {nps}"),

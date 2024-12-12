@@ -33,6 +33,11 @@ impl Action {
         }
     }
 }
+impl From<LegalAction> for Action {
+    fn from(value: LegalAction) -> Self {
+        value.downgrade()
+    }
+}
 impl std::str::FromStr for Action {
     type Err = ();
 
@@ -77,6 +82,15 @@ impl std::fmt::Display for Action {
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub struct LegalAction(u16);
 impl LegalAction {
+    /// Downgrades this legal action to a simple action.
+    pub fn downgrade(self) -> Action {
+        Action {
+            origin: self.origin(),
+            target: self.target(),
+            promotion: self.is_promotion(),
+        }
+    }
+
     const ORIGIN_MASK: u16 = 0x003F;
     const TARGET_MASK: u16 = Self::ORIGIN_MASK << 6;
     const PROMOTION: u16 = 1 << 15;

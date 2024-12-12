@@ -350,7 +350,7 @@ impl Position {
             promotion,
         }: Action,
     ) -> Result<(), IllegalMoveError> {
-        if let Some(&mv) = self.actions().iter().find(|mv| {
+        if let Some(&mv) = self.actions().0.iter().find(|mv| {
             mv.origin() == origin && mv.target() == target && mv.is_promotion() == promotion
         }) {
             self.make_legal(mv);
@@ -645,12 +645,14 @@ impl Position {
 
     /// Generates a list of legal moves in the current position.
     ///
-    /// If this function returns an empty list, the side to move is in checkmate.
-    pub fn actions(&self) -> heapless::Vec<LegalAction, 256> {
+    /// If this function returns an empty list, the side to move is in stalemate or checkmate.
+    /// An additional flag is returned for this situation: if `true`, the side to move
+    /// is in check.
+    pub fn actions(&self) -> (heapless::Vec<LegalAction, 256>, bool) {
         #[inline(always)]
         unsafe fn moves_generic<const BLACK_TO_MOVE: bool>(
             position: &Position,
-        ) -> heapless::Vec<LegalAction, 256> {
+        ) -> (heapless::Vec<LegalAction, 256>, bool) {
             let mut moves = heapless::Vec::new();
 
             // Initialize some generally useful constants.
@@ -1095,7 +1097,7 @@ impl Position {
                 moves.push_unchecked(m)
             }
 
-            moves
+            (moves, checkers_count != 0)
         }
 
         unsafe {
@@ -1105,6 +1107,21 @@ impl Position {
                 moves_generic::<false>(self)
             }
         }
+    }
+
+    /// Checks if a threefold repetition occured in this game.
+    pub fn threefold_repetition(&self) -> bool {
+        self.history
+            .iter()
+            .rev()
+            .filter(|entry| entry.hash == self.hash)
+            .count()
+            == 2
+    }
+
+    /// Checks if this position is drawn by the fifty-move rule.
+    pub fn fifty_move_draw(&self) -> bool {
+        self.reversible_moves >= 100
     }
 
     /// Checks if the side can castle queenside.

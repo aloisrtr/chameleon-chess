@@ -466,12 +466,3 @@ impl Delta {
         Self::SouthWest,
     ];
 }
-impl Delta {
-    pub(crate) const fn pawn_deltas(to_south: bool) -> (Self, Self, Self) {
-        if to_south {
-            (Self::South, Self::SouthEast, Self::SouthWest)
-        } else {
-            (Self::North, Self::NorthEast, Self::NorthWest)
-        }
-    }
-}
