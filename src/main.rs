@@ -13,20 +13,29 @@ struct Arguments {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Runs the engine in UCI mode (DEFAULT)
     Uci,
+    /// Runs perft (generating all moves up to a certain depth)
     Perft {
+        /// Maximum depth to reach
         depth: u8,
+        /// Starting position as a FEN string.
         #[arg(short, long)]
         position: Option<String>,
+        /// Shows move count for each move from the starting position
         #[arg(short)]
         divide: bool,
+        /// Generates moves for each depth up to the maximum
         #[arg(short)]
         iterative: bool,
+        /// Show timing information
         #[arg(long)]
         bench: bool,
+        /// Counts legal moves at horizon nodes instead of playing each of them
         #[arg(short)]
         bulk: bool,
 
+        /// Does not show the board and other decorations
         #[arg(long)]
         no_board: bool,
     },

@@ -143,6 +143,7 @@ impl SearchConfig {
                         id,
                         root,
                         max_depth: self.max_depth,
+                        reached_depth: 0,
                         depth: 0,
                         max_duration: self.max_duration,
                         max_nodes: self.max_nodes,

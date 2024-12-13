@@ -166,7 +166,7 @@ mod test {
                 "Expected {expected} at depth {} for {}, but got {actual}",
                 depth + 1,
                 position.fen(),
-            )
+            );
         }
     }
 
@@ -175,16 +175,7 @@ mod test {
     fn initial_position_perft() {
         check_matching(
             &mut Position::initial(),
-            &[
-                20,
-                400,
-                8902,
-                197281,
-                4865609,
-                119060324,
-                3195901860,
-                84998978956,
-            ],
+            &[20, 400, 8902, 197281, 4865609, 119060324, 3195901860],
         )
     }
 

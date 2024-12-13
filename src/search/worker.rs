@@ -24,6 +24,7 @@ use super::node::Node;
 pub struct MctsWorker<O: Write> {
     pub id: u32,
     pub root: Arc<Node>,
+    pub reached_depth: u8,
     pub max_depth: u8,
     pub depth: u8,
 
@@ -42,11 +43,16 @@ impl<O: Write> MctsWorker<O> {
     pub fn search(mut self, mut position: Position) {
         let mut info_tick = Instant::now();
         while self.within_budget() {
+            let original = position.clone();
             self.depth = 0;
             let selected = self.select(self.root.clone(), &mut position);
             let expanded = self.expand(selected, &mut position);
             let reward = Self::playout(&mut position);
             Self::backup(expanded, reward, &mut position);
+
+            if self.depth > self.reached_depth {
+                self.reached_depth = self.depth
+            }
 
             if info_tick.elapsed() > Duration::from_secs(1) {
                 info_tick = Instant::now();
@@ -55,6 +61,7 @@ impl<O: Write> MctsWorker<O> {
                 }
                 self.send_current_line().unwrap();
             }
+            assert_eq!(original, position);
         }
 
         if self.id == 0 {
@@ -107,9 +114,10 @@ impl<O: Write> MctsWorker<O> {
 
     fn playout(position: &mut Position) -> f32 {
         let mut actions_played = 0;
+        let original = position.clone();
         let value = loop {
             if position.fifty_move_draw() || position.threefold_repetition() {
-                break 0.;
+                break -0.1;
             }
 
             let (actions, check) = position.actions();
@@ -122,14 +130,12 @@ impl<O: Write> MctsWorker<O> {
                 } else if check {
                     -1.
                 } else {
-                    0.
+                    -0.1
                 };
             }
         };
 
-        for _ in 0..=actions_played {
-            position.unmake()
-        }
+        *position = original;
         value
     }
 
@@ -149,7 +155,7 @@ impl<O: Write> MctsWorker<O> {
             .lock()
             .unwrap()
             .send_message(UciMessage::Information(vec![
-                UciInformation::SearchDepth(self.depth),
+                UciInformation::SearchDepth(self.reached_depth),
                 UciInformation::SearchTime(self.start_time.elapsed()),
                 UciInformation::SearchedNodes(self.current_nodes.load(Ordering::Relaxed)),
                 UciInformation::CurrentlySearchedMove {

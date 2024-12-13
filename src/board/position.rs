@@ -5,9 +5,12 @@
 use std::hint::unreachable_unchecked;
 use thiserror::Error;
 
+use crate::board::zobrist;
+
 use super::{
     action::{Action, LegalAction},
     bitboard::Bitboard,
+    castling_rights::CastlingRights,
     colour::Colour,
     history::HistoryEntry,
     lookup_tables::*,
@@ -52,7 +55,7 @@ pub struct Position {
 
     // Metadata
     side_to_move: Colour,
-    castling_rights: u8,
+    castling_rights: CastlingRights,
     reversible_moves: u8,
     en_passant_file: Option<File>,
     history: Vec<HistoryEntry>,
@@ -68,7 +71,7 @@ impl Default for Position {
             occupancy_bitboard: Bitboard::empty(),
 
             side_to_move: Colour::White,
-            castling_rights: 0b1111,
+            castling_rights: CastlingRights::none(),
             reversible_moves: 0,
             en_passant_file: None,
             history: Vec::new(),
@@ -159,47 +162,17 @@ impl Position {
         {
             "w" => Colour::White,
             "b" => {
-                position.hash ^= Self::side_to_move_hash();
+                position.hash ^= zobrist::side_to_move_hash();
                 Colour::Black
             }
             _ => return Err(FenError::UnexpectedToken { index: 0, val: '0' }),
         };
 
-        position.castling_rights = {
-            let mut rights = 0;
-            let mut empty = false;
-            for c in sections
-                .get(2)
-                .ok_or(FenError::Incomplete("Castling Rights"))?
-                .chars()
-            {
-                match c {
-                    'k' => {
-                        position.hash ^= Self::kingside_right_hash::<true>();
-                        rights |= 0b0001
-                    }
-                    'q' => {
-                        position.hash ^= Self::queenside_right_hash::<true>();
-                        rights |= 0b0010
-                    }
-                    'K' => {
-                        position.hash ^= Self::kingside_right_hash::<false>();
-                        rights |= 0b0100
-                    }
-                    'Q' => {
-                        position.hash ^= Self::queenside_right_hash::<false>();
-                        rights |= 0b1000
-                    }
-                    '-' => empty = true,
-                    c => return Err(FenError::UnexpectedToken { index: 0, val: c }),
-                }
-            }
-
-            if (rights == 0) ^ empty {
-                return Err(FenError::ParseError);
-            }
-            rights
-        };
+        position.castling_rights = sections
+            .get(2)
+            .ok_or(FenError::Incomplete("Castling rights"))?
+            .parse()
+            .map_err(|_| FenError::ParseError)?;
 
         position.en_passant_file =
             match *sections.get(3).ok_or(FenError::Incomplete("En passant"))? {
@@ -209,7 +182,7 @@ impl Position {
                         .parse::<Square>()
                         .map_err(|_| FenError::ParseError)?
                         .file();
-                    position.hash ^= Self::en_passant_file_hash(file);
+                    position.hash ^= zobrist::en_passant_file_hash(file);
                     Some(file)
                 }
             };
@@ -262,34 +235,13 @@ impl Position {
         }
 
         format!(
-            "{pieces} {} {}{}{}{} {} {} {}",
+            "{pieces} {} {} {} {} {}",
             if self.side_to_move.is_black() {
                 'b'
             } else {
                 'w'
             },
-            if self.castling_rights & 0b0001 != 0 {
-                "k"
-            } else {
-                ""
-            },
-            if self.castling_rights & 0b0010 != 0 {
-                "q"
-            } else {
-                ""
-            },
-            if self.castling_rights & 0b0100 != 0 {
-                "K"
-            } else {
-                ""
-            },
-            if self.castling_rights & 0b1000 != 0 {
-                "Q"
-            } else if self.castling_rights == 0 {
-                "-"
-            } else {
-                ""
-            },
+            self.castling_rights,
             if let Some(ep) = self.en_passant_file {
                 Square::new(
                     ep,
@@ -319,9 +271,9 @@ impl Position {
         self.pieces[on as usize] = Some(kind);
 
         self.hash ^= if black {
-            Self::piece_hash::<true>(kind, on)
+            zobrist::piece_hash::<true>(kind, on)
         } else {
-            Self::piece_hash::<false>(kind, on)
+            zobrist::piece_hash::<false>(kind, on)
         }
     }
 
@@ -389,22 +341,32 @@ impl Position {
 
             // Reset en passant file if any
             if let Some(en_passant_file) = position.en_passant_file.take() {
-                position.hash ^= Position::en_passant_file_hash(en_passant_file)
+                position.hash ^= zobrist::en_passant_file_hash(en_passant_file)
             }
 
             // Modify castling rights if needed
             // TODO: update hash
+            position.hash ^= position.castling_rights.zobrist_hash();
             for modified in move_bitboard & Bitboard(0x9100000000000091) {
                 match modified {
-                    Square::E1 => position.castling_rights &= !0b1100,
-                    Square::A1 => position.castling_rights &= !0b1000,
-                    Square::H1 => position.castling_rights &= !0b0100,
-                    Square::E8 => position.castling_rights &= !0b0011,
-                    Square::A8 => position.castling_rights &= !0b0010,
-                    Square::H8 => position.castling_rights &= !0b0001,
+                    Square::E1 => position.castling_rights.disallow(Colour::White),
+                    Square::A1 => position
+                        .castling_rights
+                        .disallow_queenside_castle(Colour::White),
+                    Square::H1 => position
+                        .castling_rights
+                        .disallow_kingside_castle(Colour::White),
+                    Square::E8 => position.castling_rights.disallow(Colour::Black),
+                    Square::A8 => position
+                        .castling_rights
+                        .disallow_queenside_castle(Colour::Black),
+                    Square::H8 => position
+                        .castling_rights
+                        .disallow_kingside_castle(Colour::Black),
                     _ => unreachable_unchecked(),
                 }
             }
+            position.hash ^= position.castling_rights.zobrist_hash();
 
             // Take care of move kind specifics
             if let Some(to) = mv.is_promotion() {
@@ -413,8 +375,8 @@ impl Position {
                     .get_unchecked_mut(PieceKind::Pawn as usize) ^= origin.bitboard();
                 *position.piece_bitboards.get_unchecked_mut(to as usize) ^= origin.bitboard();
                 *position.pieces.get_unchecked_mut(origin as usize) = Some(to);
-                position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, origin);
-                position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(to, origin);
+                position.hash ^= zobrist::piece_hash::<BLACK_TO_MOVE>(moving_kind, origin);
+                position.hash ^= zobrist::piece_hash::<BLACK_TO_MOVE>(to, origin);
                 moving_kind = to;
 
                 if mv.is_capture() {
@@ -427,9 +389,9 @@ impl Position {
                         .get_unchecked_mut(captured as usize) ^= target.bitboard();
                     position.occupancy_bitboard ^= target.bitboard();
                     if BLACK_TO_MOVE {
-                        position.hash ^= Position::piece_hash::<false>(captured, target);
+                        position.hash ^= zobrist::piece_hash::<false>(captured, target);
                     } else {
-                        position.hash ^= Position::piece_hash::<true>(captured, target);
+                        position.hash ^= zobrist::piece_hash::<true>(captured, target);
                     }
                 }
                 position.reversible_moves = 0
@@ -452,9 +414,9 @@ impl Position {
                     .get_unchecked_mut(captured as usize) ^= target.bitboard();
                 position.occupancy_bitboard ^= target.bitboard();
                 if BLACK_TO_MOVE {
-                    position.hash ^= Position::piece_hash::<false>(captured, target);
+                    position.hash ^= zobrist::piece_hash::<false>(captured, target);
                 } else {
-                    position.hash ^= Position::piece_hash::<true>(captured, target);
+                    position.hash ^= zobrist::piece_hash::<true>(captured, target);
                 }
                 position.reversible_moves = 0
             } else if mv.special_1_is_set() {
@@ -479,14 +441,12 @@ impl Position {
                     .pieces
                     .get_unchecked_mut(rook_origin as usize)
                     .take();
-                position.hash ^=
-                    Position::piece_hash::<BLACK_TO_MOVE>(PieceKind::Rook, rook_origin);
-                position.hash ^=
-                    Position::piece_hash::<BLACK_TO_MOVE>(PieceKind::Rook, rook_target);
+                position.hash ^= zobrist::piece_hash::<BLACK_TO_MOVE>(PieceKind::Rook, rook_origin);
+                position.hash ^= zobrist::piece_hash::<BLACK_TO_MOVE>(PieceKind::Rook, rook_target);
                 position.reversible_moves = 0
             } else if mv.special_0_is_set() {
                 position.en_passant_file = Some(origin.file());
-                position.hash ^= Position::en_passant_file_hash(origin.file());
+                position.hash ^= zobrist::en_passant_file_hash(origin.file());
                 position.reversible_moves = 0
             } else if moving_kind != PieceKind::Pawn {
                 position.reversible_moves += 1
@@ -502,11 +462,11 @@ impl Position {
             position.occupancy_bitboard ^= move_bitboard;
             *position.pieces.get_unchecked_mut(target as usize) =
                 position.pieces.get_unchecked_mut(origin as usize).take();
-            position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, origin);
-            position.hash ^= Position::piece_hash::<BLACK_TO_MOVE>(moving_kind, target);
+            position.hash ^= zobrist::piece_hash::<BLACK_TO_MOVE>(moving_kind, origin);
+            position.hash ^= zobrist::piece_hash::<BLACK_TO_MOVE>(moving_kind, target);
 
             position.side_to_move.invert();
-            position.hash ^= Position::side_to_move_hash();
+            position.hash ^= zobrist::side_to_move_hash();
         }
 
         unsafe {
@@ -1114,6 +1074,7 @@ impl Position {
         self.history
             .iter()
             .rev()
+            .take(self.reversible_moves as usize)
             .filter(|entry| entry.hash == self.hash)
             .count()
             == 2
@@ -1128,13 +1089,13 @@ impl Position {
     #[inline(always)]
     fn queenside_castle_allowed<const BLACK_TO_MOVE: bool>(&self, attacked: Bitboard) -> bool {
         if BLACK_TO_MOVE {
-            self.castling_rights & 0b0010 != 0
+            self.castling_rights.queenside_castle_allowed(Colour::Black)
                 && !self
                     .occupancy_bitboard
                     .intersects(Bitboard(0xe00000000000000))
                 && !attacked.intersects(Bitboard(0xc00000000000000))
         } else {
-            self.castling_rights & 0b1000 != 0
+            self.castling_rights.queenside_castle_allowed(Colour::White)
                 && !self.occupancy_bitboard.intersects(Bitboard(0xe))
                 && !attacked.intersects(Bitboard(0xc))
         }
@@ -1143,13 +1104,13 @@ impl Position {
     #[inline(always)]
     fn kingside_castle_allowed<const BLACK_TO_MOVE: bool>(&self, attacked: Bitboard) -> bool {
         if BLACK_TO_MOVE {
-            self.castling_rights & 0b0001 != 0
+            self.castling_rights.kingside_castle_allowed(Colour::Black)
                 && !self
                     .occupancy_bitboard
                     .intersects(Bitboard(0x6000000000000000))
                 && !attacked.intersects(Bitboard(0x6000000000000000))
         } else {
-            self.castling_rights & 0b0100 != 0
+            self.castling_rights.kingside_castle_allowed(Colour::White)
                 && !self.occupancy_bitboard.intersects(Bitboard(0x60))
                 && !attacked.intersects(Bitboard(0x60))
         }
@@ -1160,61 +1121,6 @@ impl Position {
     pub fn zobrist_hash(&self) -> u64 {
         self.hash
     }
-
-    // We need :
-    // - one number from piece on each square (64 * 12)
-    // - one number for side to move
-    // - four numbers for castling rights
-    // - eight numbers for en passant file
-
-    // We use overlapping keys to make it efficiently cachable.
-    // Accesses are byte aligned, making it so that we only need 784 bytes instead of
-    // 3124 bytes for aligned access.
-    #[inline(always)]
-    const fn piece_hash<const BLACK_PIECE: bool>(kind: PieceKind, square: Square) -> u64 {
-        let piece_offset = kind as usize * square as usize;
-        if BLACK_PIECE {
-            Position::ZOBRIST_KEYS[piece_offset + 64 * 6]
-        } else {
-            Position::ZOBRIST_KEYS[piece_offset]
-        }
-    }
-    #[inline(always)]
-    const fn side_to_move_hash() -> u64 {
-        Position::ZOBRIST_KEYS[64 * 12]
-    }
-    #[inline(always)]
-    const fn queenside_right_hash<const BLACK: bool>() -> u64 {
-        if BLACK {
-            Position::ZOBRIST_KEYS[64 * 12 + 3]
-        } else {
-            Position::ZOBRIST_KEYS[64 * 12 + 1]
-        }
-    }
-    #[inline(always)]
-    const fn kingside_right_hash<const BLACK: bool>() -> u64 {
-        if BLACK {
-            Position::ZOBRIST_KEYS[64 * 12 + 4]
-        } else {
-            Position::ZOBRIST_KEYS[64 * 12 + 2]
-        }
-    }
-    #[inline(always)]
-    const fn en_passant_file_hash(file: File) -> u64 {
-        Position::ZOBRIST_KEYS[64 * 12 + 5 + file as usize]
-    }
-
-    const ZOBRIST_KEYS: [u64; 781] = {
-        let mut result = [0; 781];
-
-        let mut i = 0;
-        while i < 781 {
-            result[i] = const_random::const_random!(u64);
-            i += 1
-        }
-
-        result
-    };
 }
 impl std::hash::Hash for Position {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -1245,31 +1151,7 @@ impl std::fmt::Display for Position {
                             "-".to_string()
                         }
                     ),
-                    6 => writeln!(
-                        f,
-                        "castling rights: {}{}{}{}{}",
-                        if self.castling_rights & 0b0100 != 0 {
-                            "K"
-                        } else {
-                            ""
-                        },
-                        if self.castling_rights & 0b1000 != 0 {
-                            "Q"
-                        } else {
-                            ""
-                        },
-                        if self.castling_rights & 0b0001 != 0 {
-                            "k"
-                        } else {
-                            ""
-                        },
-                        if self.castling_rights & 0b0010 != 0 {
-                            "q"
-                        } else {
-                            ""
-                        },
-                        if self.castling_rights == 0 { "-" } else { "" }
-                    ),
+                    6 => writeln!(f, "castling rights: {}", self.castling_rights),
                     7 => writeln!(f, "hash: {:#0x}", self.hash),
                     _ => writeln!(f),
                 }?
@@ -1280,7 +1162,13 @@ impl std::fmt::Display for Position {
                 match self.piece_on(square) {
                     None => ".".to_string(),
                     Some((kind, color)) =>
-                        if color == Colour::Black {
+                        if kind == PieceKind::Pawn {
+                            if color == Colour::Black {
+                                String::from("x")
+                            } else {
+                                String::from("o")
+                            }
+                        } else if color == Colour::Black {
                             kind.to_string()
                         } else {
                             kind.to_string().to_uppercase()
@@ -1290,5 +1178,21 @@ impl std::fmt::Display for Position {
         }
 
         writeln!(f, "\nfen: {}", self.fen())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::board::{action::Action, square::Square};
+
+    use super::Position;
+
+    #[test]
+    fn hash_test() {
+        let mut pos = Position::initial();
+        let og_hash = pos.zobrist_hash();
+        pos.make(Action::new(Square::E2, Square::E4)).unwrap();
+        pos.unmake();
+        assert_eq!(og_hash, pos.zobrist_hash())
     }
 }
