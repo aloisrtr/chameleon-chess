@@ -15,7 +15,7 @@ use node::Node;
 use worker::MctsWorker;
 
 use crate::{
-    board::{
+    game::{
         action::{Action, LegalAction},
         position::Position,
     },

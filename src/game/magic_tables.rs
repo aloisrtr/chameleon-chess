@@ -411,8 +411,7 @@ static SLIDERS_TABLE_ENTRIES: [SliderTableEntry; 128] = {
 };
 
 /// This constant is computed ASSUMING THAT SLIDER_TABLE_ENTRIES IS CORRECT.
-/// If this assumptioN doesn't hold, the program is entirely incorrect.
-#[allow(long_running_const_eval)]
+/// If this assumption doesn't hold, the program is entirely incorrect.
 static SLIDERS_TABLE: [Bitboard; 107648] = {
     let magics: [u64; 128] = [
         293861533946085504,
@@ -690,36 +689,10 @@ static SLIDERS_TABLE: [Bitboard; 107648] = {
 
             // Generate moves
             if table[offset + index].is_empty() {
-                let deltas = if square < 64 {
-                    [
-                        Delta::NorthEast,
-                        Delta::NorthWest,
-                        Delta::SouthEast,
-                        Delta::SouthWest,
-                    ]
+                table[offset + index] = if square < 64 {
+                    diagonal_attacks(origin, current_blockers)
                 } else {
-                    [Delta::North, Delta::South, Delta::East, Delta::West]
-                };
-
-                let mut i = 0;
-                while i < 4 {
-                    let delta = deltas[i];
-                    let Some(mut current_square) = origin.translate(delta) else {
-                        i += 1;
-                        continue;
-                    };
-                    'ray: loop {
-                        table[offset + index].0 |= 1 << current_square as u8;
-                        if (current_blockers.0 & (1 << current_square as u8)) != 0 {
-                            break 'ray;
-                        } else if let Some(sq) = current_square.translate(delta) {
-                            current_square = sq;
-                        } else {
-                            break 'ray;
-                        }
-                    }
-
-                    i += 1
+                    orthogonal_attacks(origin, current_blockers)
                 }
             }
 
@@ -736,3 +709,92 @@ static SLIDERS_TABLE: [Bitboard; 107648] = {
 
     table
 };
+
+// Kogge-Stone algorithm for fast sliding piece moves.
+const fn orthogonal_attacks(origin: Square, blockers: Bitboard) -> Bitboard {
+    let bb = origin.bitboard().0;
+    let empty = !blockers.0;
+    Bitboard(
+        south_ray(bb, empty) | north_ray(bb, empty) | east_ray(bb, empty) | west_ray(bb, empty),
+    )
+}
+const fn diagonal_attacks(origin: Square, blockers: Bitboard) -> Bitboard {
+    let bb = origin.bitboard().0;
+    let empty = !blockers.0;
+    Bitboard(
+        south_east_ray(bb, empty)
+            | north_west_ray(bb, empty)
+            | north_east_ray(bb, empty)
+            | south_west_ray(bb, empty),
+    )
+}
+const fn south_ray(mut gen: u64, mut empt: u64) -> u64 {
+    gen |= empt & (gen >> 8);
+    empt &= empt >> 8;
+    gen |= empt & (gen >> 16);
+    empt &= empt >> 16;
+    gen |= empt & (gen >> 32);
+    gen >> 8
+}
+const fn north_ray(mut gen: u64, mut empt: u64) -> u64 {
+    gen |= empt & (gen << 8);
+    empt &= empt << 8;
+    gen |= empt & (gen << 16);
+    empt &= empt << 16;
+    gen |= empt & (gen << 32);
+    gen << 8
+}
+const fn east_ray(mut gen: u64, mut empt: u64) -> u64 {
+    empt &= !File::A.bitboard().0;
+    gen |= empt & (gen << 1);
+    empt &= empt << 1;
+    gen |= empt & (gen << 2);
+    empt &= empt << 2;
+    gen |= empt & (gen << 4);
+    (gen << 1) & !File::A.bitboard().0
+}
+const fn north_east_ray(mut gen: u64, mut empt: u64) -> u64 {
+    empt &= !File::A.bitboard().0;
+    gen |= empt & (gen << 9);
+    empt &= empt << 9;
+    gen |= empt & (gen << 18);
+    empt &= empt << 18;
+    gen |= empt & (gen << 36);
+    (gen << 9) & !File::A.bitboard().0
+}
+const fn south_east_ray(mut gen: u64, mut empt: u64) -> u64 {
+    empt &= !File::A.bitboard().0;
+    gen |= empt & (gen >> 7);
+    empt &= empt >> 7;
+    gen |= empt & (gen >> 14);
+    empt &= empt >> 14;
+    gen |= empt & (gen >> 28);
+    (gen >> 7) & !File::A.bitboard().0
+}
+const fn west_ray(mut gen: u64, mut empt: u64) -> u64 {
+    empt &= !File::H.bitboard().0;
+    gen |= empt & (gen >> 1);
+    empt &= empt >> 1;
+    gen |= empt & (gen >> 2);
+    empt &= empt >> 2;
+    gen |= empt & (gen >> 4);
+    (gen >> 1) & !File::H.bitboard().0
+}
+const fn north_west_ray(mut gen: u64, mut empt: u64) -> u64 {
+    empt &= !File::H.bitboard().0;
+    gen |= empt & (gen << 7);
+    empt &= empt << 7;
+    gen |= empt & (gen << 14);
+    empt &= empt << 14;
+    gen |= empt & (gen << 28);
+    (gen << 7) & !File::H.bitboard().0
+}
+const fn south_west_ray(mut gen: u64, mut empt: u64) -> u64 {
+    empt &= !File::H.bitboard().0;
+    gen |= empt & (gen >> 9);
+    empt &= empt >> 9;
+    gen |= empt & (gen >> 18);
+    empt &= empt >> 18;
+    gen |= empt & (gen >> 36);
+    (gen >> 9) & !File::H.bitboard().0
+}

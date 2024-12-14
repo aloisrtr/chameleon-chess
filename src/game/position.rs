@@ -5,10 +5,7 @@
 use std::hint::unreachable_unchecked;
 use thiserror::Error;
 
-use crate::{
-    board::zobrist,
-    brain::feature::{feature_index, piece_feature_index},
-};
+use crate::brain::feature::{feature_index, piece_feature_index};
 
 use super::{
     action::{Action, LegalAction},
@@ -16,9 +13,10 @@ use super::{
     castling_rights::CastlingRights,
     colour::Colour,
     history::HistoryEntry,
-    lookup_tables::*,
+    magic_tables::*,
     piece::PieceKind,
     square::{Delta, File, Rank, Square},
+    zobrist,
 };
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
@@ -1294,7 +1292,7 @@ impl std::fmt::Display for Position {
 
 #[cfg(test)]
 mod test {
-    use crate::board::{action::Action, square::Square};
+    use crate::game::{action::Action, square::Square};
 
     use super::Position;
 

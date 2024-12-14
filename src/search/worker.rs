@@ -12,8 +12,8 @@ use std::{
 use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
-    board::position::Position,
     brain::nnue::{self, NnueAccumulator},
+    game::position::Position,
     protocols::uci::{
         commands::{UciInformation, UciMessage},
         endpoint::UciWriter,

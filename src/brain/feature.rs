@@ -2,7 +2,7 @@
 //! This uses the HalfKP featureset. Each input indicates the position of our king,
 //! occupied square, piece kind and colour.
 
-use crate::board::{colour::Colour, piece::PieceKind, square::Square};
+use crate::game::{colour::Colour, piece::PieceKind, square::Square};
 
 pub const FEATURES_COUNT: usize = 40960;
 

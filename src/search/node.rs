@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use crate::board::{action::LegalAction, position::Position};
+use crate::game::{action::LegalAction, position::Position};
 
 /// MCTS node that is accessible through threads lock-free.
 pub struct Node {

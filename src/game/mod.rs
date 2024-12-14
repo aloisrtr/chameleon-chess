@@ -3,7 +3,7 @@ mod bitboard;
 pub mod castling_rights;
 pub mod colour;
 mod history;
-mod lookup_tables;
+mod magic_tables;
 #[cfg(feature = "perft")]
 pub mod perft;
 pub mod piece;

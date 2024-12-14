@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::board::action::Action;
+use crate::game::action::Action;
 
 /// A builder to create clean parameters of search from the server to the engine.
 #[derive(Clone, PartialEq, Eq, Default, Debug)]

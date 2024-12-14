@@ -24,7 +24,7 @@ use std::{
 };
 
 use crate::{
-    board::position::Position,
+    game::position::Position,
     search::{SearchConfig, SearchHandle},
 };
 

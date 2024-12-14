@@ -2,7 +2,7 @@
 //! These are commands that can be sent to another UCI compatible program through
 //! an [`UciServerEndpoint`] for messages or [`UciClientEndpoint`] for commands.
 
-use crate::{board::action::Action, protocols::uci::options::UciValue};
+use crate::{game::action::Action, protocols::uci::options::UciValue};
 use std::{collections::BTreeMap, time::Duration};
 
 use super::{options::UciOptionField, search::UciSearchParameters};

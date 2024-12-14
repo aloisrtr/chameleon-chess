@@ -1,7 +1,6 @@
-use chameleon_chess::{
-    board::{perft::PerftConfig, position::Position},
-    protocols::uci::uci_client,
-};
+#[cfg(feature = "perft")]
+use chameleon_chess::game::perft::PerftConfig;
+use chameleon_chess::{game::position::Position, protocols::uci::uci_client};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -46,6 +45,7 @@ pub fn main() {
 
     match args.command.unwrap_or(Command::Uci) {
         Command::Uci => uci_client().unwrap(),
+        #[cfg(feature = "perft")]
         Command::Perft {
             position,
             depth,
@@ -70,6 +70,10 @@ pub fn main() {
                 show_board: !no_board,
             }
             .go(&mut position)
+        }
+        #[cfg(not(feature = "perft"))]
+        Command::Perft { .. } => {
+            eprintln!("Chameleon has not been compiled with feature `perft`");
         }
     }
 }
