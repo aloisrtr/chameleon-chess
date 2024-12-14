@@ -13,7 +13,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     brain::nnue::{self, NnueAccumulator},
-    game::position::Position,
+    game::{position::Position, score::*},
     protocols::uci::{
         commands::{UciInformation, UciMessage},
         endpoint::UciWriter,
@@ -126,6 +126,7 @@ impl<O: Write> MctsWorker<O> {
         }
     }
 
+    /// Checks if this worker is within its search budget.
     pub fn within_budget(&self) -> bool {
         !self.should_stop.load(Ordering::Relaxed)
             && (self.start_time.elapsed() < self.max_duration)
@@ -224,7 +225,7 @@ impl<O: Write> MctsWorker<O> {
                         .collect(),
                 },
                 UciInformation::CentipawnScore {
-                    centipawns: (self.root.exploitation_score() * 1000.) as i16,
+                    centipawns: win_probability_to_centipawns(self.root.exploitation_score()),
                     is_upper_bound: None,
                 },
             ]))

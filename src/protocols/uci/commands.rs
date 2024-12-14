@@ -1,8 +1,10 @@
-//! # UCI Commands
-//! These are commands that can be sent to another UCI compatible program through
-//! an [`UciServerEndpoint`] for messages or [`UciClientEndpoint`] for commands.
+//! # UCI Commands/Messages
+//! These are commands/messages that can be sent to another UCI compatible program.
 
-use crate::{game::action::Action, protocols::uci::options::UciValue};
+use crate::{
+    game::{action::Action, score::CentiPawns},
+    protocols::uci::options::UciValue,
+};
 use std::{collections::BTreeMap, time::Duration};
 
 use super::{options::UciOptionField, search::UciSearchParameters};
@@ -374,7 +376,7 @@ pub enum UciInformation {
         moves: Vec<Action>,
     },
     CentipawnScore {
-        centipawns: i16,
+        centipawns: CentiPawns,
         is_upper_bound: Option<bool>,
     },
     MateIn {

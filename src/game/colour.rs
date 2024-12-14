@@ -1,4 +1,5 @@
-/// Colours for each player.
+//! Colours for each players and their pieces.
+
 #[repr(u8)]
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
 pub enum Colour {

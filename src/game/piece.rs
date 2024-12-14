@@ -1,4 +1,5 @@
-/// Existing types of pieces.
+//! Piece types in Chess.
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum PieceKind {
