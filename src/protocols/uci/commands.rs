@@ -2,13 +2,10 @@
 //! These are commands that can be sent to another UCI compatible program through
 //! an [`UciServerEndpoint`] for messages or [`UciClientEndpoint`] for commands.
 
-use crate::board::action::Action;
-use std::{
-    collections::BTreeMap,
-    convert::Infallible,
-    num::{NonZeroU64, NonZeroU8},
-    time::Duration,
-};
+use crate::{board::action::Action, protocols::uci::options::UciValue};
+use std::{collections::BTreeMap, time::Duration};
+
+use super::{options::UciOptionField, search::UciSearchParameters};
 
 /// Commands that can be received by the client (engine) from the server.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -18,7 +15,7 @@ pub enum UciCommand {
     IsReady,
     SetOption {
         name: String,
-        value: Option<UciValue>,
+        value: UciValue,
     },
     RegisterLater,
     RegisterName(String),
@@ -49,9 +46,9 @@ impl std::fmt::Display for UciCommand {
                     f,
                     "setoption name {name}{}",
                     match value {
-                        Some(UciValue::Boolean(b)) => format!(" value {b}"),
-                        Some(UciValue::Integer(i)) => format!(" value {i}"),
-                        Some(UciValue::Str(s)) => format!(" value {s}"),
+                        UciValue::Boolean(b) => format!(" value {b}"),
+                        UciValue::Integer(i) => format!(" value {i}"),
+                        UciValue::Str(s) => format!(" value {s}"),
                         _ => String::new(),
                     }
                 )
@@ -154,13 +151,11 @@ impl std::str::FromStr for UciCommand {
                 }
             }
             "setoption" => {
-                let name = parameters
-                    .get("name")
-                    .map(|v| String::from(v.join(" ")))
-                    .ok_or(())?;
+                let name = parameters.get("name").map(|v| v.join(" ")).ok_or(())?;
                 let value = parameters
                     .get("value")
-                    .and_then(|v| v.join(" ").parse().ok());
+                    .and_then(|v| v.join(" ").parse().ok())
+                    .unwrap_or(UciValue::Button);
                 UciCommand::SetOption { name, value }
             }
             "register" => {
@@ -202,7 +197,7 @@ impl std::str::FromStr for UciCommand {
                             .flat_map(|m| m.parse().ok())
                             .collect::<Vec<_>>(),
                     )
-                    .set_ponder(parameters.get("ponder").is_some())
+                    .set_ponder(parameters.contains_key("ponder"))
                     .with_white_time(
                         parameters
                             .get("wtime")
@@ -272,7 +267,7 @@ impl std::str::FromStr for UciCommand {
                             })
                             .unwrap_or(Duration::ZERO),
                     )
-                    .set_infinite(parameters.get("infinite").is_some());
+                    .set_infinite(parameters.contains_key("infinite"));
 
                 UciCommand::StartSearch(search_parameters)
             }
@@ -301,7 +296,10 @@ pub enum UciMessage {
     RegistrationStatus(bool),
     Information(Vec<UciInformation>),
     Debug(String),
-    Option(UciOption),
+    Option {
+        name: String,
+        field: UciOptionField,
+    },
 }
 impl std::fmt::Display for UciMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -337,11 +335,10 @@ impl std::fmt::Display for UciMessage {
                     .fold(String::new(), |acc, info| format!("{acc} {info}"))
             ),
             Self::Debug(msg) => writeln!(f, "info string {msg}"),
-            Self::Option(option) => writeln!(
+            Self::Option { name, field } => writeln!(
                 f,
-                "option name {} type {}",
-                &option.name,
-                match &option.value {
+                "option name {name} type {}",
+                match &field {
                     UciOptionField::Boolean { default, .. } => format!("check default {default}"),
                     UciOptionField::IntegerRange {
                         min, max, default, ..
@@ -362,150 +359,6 @@ impl std::fmt::Display for UciMessage {
                 },
             ),
         }
-    }
-}
-
-/// A builder to create clean parameters of search from the server to the engine.
-#[derive(Clone, PartialEq, Eq, Default, Debug)]
-pub struct UciSearchParameters {
-    pub(crate) available_moves: Vec<Action>,
-    pub(crate) ponder: bool,
-    pub(crate) white_time: Option<Duration>,
-    pub(crate) black_time: Option<Duration>,
-    pub(crate) white_increment: Option<Duration>,
-    pub(crate) black_increment: Option<Duration>,
-    pub(crate) moves_until_time_control: Option<NonZeroU8>,
-    pub(crate) depth: Option<NonZeroU8>,
-    pub(crate) nodes: Option<NonZeroU64>,
-    pub(crate) distance_to_mate: Option<NonZeroU8>,
-    pub(crate) search_time: Option<Duration>,
-    pub(crate) infinite: bool,
-}
-impl UciSearchParameters {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn with_available_moves(mut self, moves: &[Action]) -> Self {
-        self.available_moves = Vec::from(moves);
-        self
-    }
-    pub fn set_ponder(mut self, ponder: bool) -> Self {
-        self.ponder = ponder;
-        self
-    }
-    pub fn with_time_constraint(mut self, time: Duration) -> Self {
-        self.white_time = if time.is_zero() { None } else { Some(time) };
-        self
-    }
-    pub fn with_white_time(mut self, time: Duration) -> Self {
-        self.black_time = if time.is_zero() { None } else { Some(time) };
-        self
-    }
-    pub fn with_black_time(mut self, time: Duration) -> Self {
-        self.black_time = if time.is_zero() { None } else { Some(time) };
-        self
-    }
-    pub fn with_white_increment(mut self, increment: Duration) -> Self {
-        self.white_increment = if increment.is_zero() {
-            None
-        } else {
-            Some(increment)
-        };
-        self
-    }
-    pub fn with_black_increment(mut self, increment: Duration) -> Self {
-        self.black_increment = if increment.is_zero() {
-            None
-        } else {
-            Some(increment)
-        };
-        self
-    }
-    pub fn with_moves_until_time_control(mut self, moves: u8) -> Self {
-        if let Some(moves) = NonZeroU8::new(moves) {
-            self.moves_until_time_control = Some(moves)
-        } else {
-            self.moves_until_time_control = None
-        }
-        self
-    }
-    pub fn with_depth(mut self, depth: u8) -> Self {
-        if let Some(depth) = NonZeroU8::new(depth) {
-            self.depth = Some(depth)
-        } else {
-            self.depth = None
-        }
-        self
-    }
-    pub fn with_nodes(mut self, nodes: u64) -> Self {
-        if let Some(nodes) = NonZeroU64::new(nodes) {
-            self.nodes = Some(nodes)
-        } else {
-            self.nodes = None
-        }
-        self
-    }
-    pub fn with_distance_to_mate(mut self, distance: u8) -> Self {
-        if let Some(distance) = NonZeroU8::new(distance) {
-            self.distance_to_mate = Some(distance)
-        } else {
-            self.distance_to_mate = None
-        }
-        self
-    }
-    pub fn with_search_time(mut self, time: Duration) -> Self {
-        self.search_time = if time.is_zero() { None } else { Some(time) };
-        self
-    }
-    pub fn set_infinite(mut self, infinite: bool) -> Self {
-        self.infinite = infinite;
-        self
-    }
-
-    pub fn as_uci_string(&self) -> String {
-        let mut uci = String::new();
-        if !self.available_moves.is_empty() {
-            uci = format!(
-                "{uci}searchmoves {} ",
-                self.available_moves
-                    .iter()
-                    .fold(String::new(), |acc, m| format!("{acc} {m}"))
-            )
-        }
-        if self.ponder {
-            uci = format!("{uci}ponder ")
-        }
-        if let Some(time) = self.white_time {
-            uci = format!("{uci}wtime {} ", time.as_millis())
-        }
-        if let Some(time) = self.black_time {
-            uci = format!("{uci}btime {} ", time.as_millis())
-        }
-        if let Some(increment) = self.white_increment {
-            uci = format!("{uci}winc {} ", increment.as_millis())
-        }
-        if let Some(increment) = self.black_increment {
-            uci = format!("{uci}binc {} ", increment.as_millis())
-        }
-        if let Some(moves) = self.moves_until_time_control {
-            uci = format!("{uci}movestogo {moves} ")
-        }
-        if let Some(depth) = self.depth {
-            uci = format!("{uci}depth {depth} ")
-        }
-        if let Some(nodes) = self.nodes {
-            uci = format!("{uci}nodes {nodes} ")
-        }
-        if let Some(distance) = self.distance_to_mate {
-            uci = format!("{uci}mate {distance} ")
-        }
-        if let Some(search_time) = self.search_time {
-            uci = format!("{uci}movetime {} ", search_time.as_millis())
-        }
-        if self.infinite {
-            uci = format!("{uci}infinite")
-        }
-        uci
     }
 }
 
@@ -624,59 +477,4 @@ impl std::fmt::Display for UciInformation {
             ),
         }
     }
-}
-
-/// The different types of UCI fields available.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum UciOptionField {
-    Boolean {
-        actual: bool,
-        default: bool,
-    },
-    IntegerRange {
-        actual: i32,
-        default: i32,
-        min: i32,
-        max: i32,
-    },
-    Choice {
-        default: usize,
-        actual: usize,
-        possibilities: Vec<String>,
-    },
-    String {
-        default: String,
-        actual: String,
-    },
-    Button,
-}
-
-/// The different types of UCI values available.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum UciValue {
-    Boolean(bool),
-    Integer(i32),
-    Str(String),
-    Button,
-}
-impl std::str::FromStr for UciValue {
-    type Err = Infallible;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(if let Ok(b) = s.parse::<bool>() {
-            Self::Boolean(b)
-        } else if let Ok(i) = s.parse::<i32>() {
-            Self::Integer(i)
-        } else if !s.is_empty() {
-            Self::Str(String::from_str(s).unwrap())
-        } else {
-            Self::Button
-        })
-    }
-}
-
-/// Defines an UCI option that can be set by the server on the engine.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct UciOption {
-    pub name: String,
-    pub value: UciOptionField,
 }

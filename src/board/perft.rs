@@ -131,11 +131,11 @@ fn perft_rec(position: &mut Position, depth_left: u8, bulk_counting: bool) -> u6
 
 fn human_readable_time(secs: f64) -> String {
     if secs < 1. {
-        format!("{:.3}ms", secs * 1000.)
+        format!("{:.3}ms", secs * 1_000.)
     } else if secs < 0.001 {
-        format!("{:.3}μs", secs * 1000_000.)
-    } else if secs < 0.000_0001 {
-        format!("{:.3}ns", secs * 1000_000_000.)
+        format!("{:.3}μs", secs * 1_000_000.)
+    } else if secs < 0.000_000_1 {
+        format!("{:.3}ns", secs * 1_000_000_000.)
     } else {
         format!("{secs:.3}s")
     }

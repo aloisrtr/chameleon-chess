@@ -1,7 +1,7 @@
 use std::{
     cell::UnsafeCell,
     sync::{
-        atomic::{AtomicBool, AtomicI16, AtomicU64, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicI16, AtomicU64, Ordering},
         Arc, Weak,
     },
 };
@@ -107,14 +107,14 @@ impl Node {
     /// Returns the score and visits of this node.
     pub fn score_and_visits(&self) -> (f32, u32) {
         let sv = self.score_visits.load(Ordering::SeqCst);
-        let score = unsafe { std::mem::transmute((sv >> 32) as u32) };
+        let score = f32::from_bits((sv >> 32) as u32);
         let visits = (sv & 0xFFFFFFFF) as u32;
         (score, visits)
     }
 
     /// Modifies the score of this node by `delta`, adding one visit in the process.
     pub fn modify_score(&self, delta: f32) {
-        let sv = unsafe { ((std::mem::transmute::<_, u32>(delta) as u64) << 32) | 1 };
+        let sv = ((delta.to_bits() as u64) << 32) | 1;
         self.score_visits.fetch_add(sv, Ordering::SeqCst);
     }
 

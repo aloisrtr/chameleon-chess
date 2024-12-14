@@ -2,7 +2,10 @@
 
 use std::str::FromStr;
 
-use super::{colour::Colour, zobrist::ZOBRIST_KEYS};
+use super::{
+    colour::Colour,
+    zobrist::{CASTLING_RIGHTS_OFFSET, ZOBRIST_KEYS},
+};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CastlingRights(u8);
 impl CastlingRights {
@@ -82,7 +85,7 @@ impl CastlingRights {
         for i in 0..4 {
             let mask = 1 << i;
             if self.0 & mask != 0 {
-                hash ^= ZOBRIST_KEYS[64 * 12 + 1 + i]
+                hash ^= ZOBRIST_KEYS[CASTLING_RIGHTS_OFFSET + i]
             }
         }
         hash

@@ -18,17 +18,24 @@
 //! UCI uses **long algebraic notation** for moves, i.e. `<from><to>[promotion]`.
 
 use std::{
+    collections::BTreeMap,
     io::Write,
     sync::{Arc, Mutex},
 };
 
-use crate::{board::position::Position, search::SearchConfig};
+use crate::{
+    board::position::Position,
+    search::{SearchConfig, SearchHandle},
+};
 
 pub mod commands;
 pub mod endpoint;
+pub mod options;
+pub mod search;
 
 use commands::{UciCommand, UciMessage};
 use endpoint::{UciReader, UciWriter};
+use options::{UciOptionField, UciValue};
 
 pub fn uci_client() -> std::io::Result<()> {
     let mut position = Position::initial();
@@ -36,21 +43,25 @@ pub fn uci_client() -> std::io::Result<()> {
 
     let writer = Arc::new(Mutex::new(UciWriter::new(std::io::stdout())));
     let mut reader = UciReader::new(std::io::stdin());
-    let mut search_handle = None;
+    let mut search_handle: Option<SearchHandle> = None;
+
+    let mut options = setup_options();
 
     'uci: loop {
         match reader.read_command() {
             Ok(Some(cmd)) => {
                 log::info!("Received command {cmd:?}");
                 match cmd {
-                    UciCommand::Initialize => initialize_engine(&writer)?,
+                    UciCommand::Initialize => initialize_engine(&writer, &options)?,
                     UciCommand::IsReady => send_message(&writer, UciMessage::Ready)?,
                     UciCommand::Debug(on) => debug = on,
                     UciCommand::SetOption { name, value } => {
-                        todo!("options are not yet implemented")
+                        if let Some(field) = options.get_mut(&name) {
+                            field.assign(value).unwrap()
+                        }
                     }
                     UciCommand::NewGame => {
-                        todo!()
+                        // TODO: refresh the game tree when implemented correctly
                     }
                     UciCommand::SetPosition { fen, moves } => {
                         position = if let Some(fen) = fen {
@@ -59,18 +70,23 @@ pub fn uci_client() -> std::io::Result<()> {
                             Position::initial()
                         };
                         for m in moves {
-                            if let Err(_) = position.make(m) {
+                            if position.make(m).is_err() {
                                 log::error!("Illegal move in position command: {m}");
                                 panic!();
                             }
                         }
                     }
                     UciCommand::StartSearch(params) => {
-                        if search_handle.is_some() {
-                            send_debug_message(&writer, "A search is already running", debug)?;
-                            continue;
+                        if let Some(mut handle) = search_handle.take() {
+                            handle.stop()
                         }
-                        let config = SearchConfig::from(params);
+
+                        let mut config = SearchConfig::from(params);
+                        if let Some(UciValue::Integer(value)) =
+                            options.get("SearchWorkers").map(UciOptionField::value)
+                        {
+                            config = config.with_workers(value as u32)
+                        }
                         send_debug_message(
                             &writer,
                             format!("Running search with parameters {config:?}"),
@@ -111,15 +127,39 @@ pub fn uci_client() -> std::io::Result<()> {
     Ok(())
 }
 
-fn initialize_engine<O: Write>(writer: &Arc<Mutex<UciWriter<O>>>) -> std::io::Result<()> {
+fn setup_options() -> BTreeMap<String, UciOptionField> {
+    let mut options = BTreeMap::new();
+    options.insert(
+        "SearchWorkers".to_string(),
+        UciOptionField::IntegerRange {
+            actual: num_cpus::get_physical() as i32,
+            default: num_cpus::get_physical() as i32,
+            min: 1,
+            max: num_cpus::get() as i32,
+        },
+    );
+    options
+}
+
+fn initialize_engine<O: Write>(
+    writer: &Arc<Mutex<UciWriter<O>>>,
+    options: &BTreeMap<String, UciOptionField>,
+) -> std::io::Result<()> {
     let mut writer = writer.lock().unwrap();
     // Register the engine
     writer.send_message(UciMessage::Identity {
         name: String::from("chameleon-chess"),
         author: String::from("Aloïs Rautureau"),
     })?;
+
     // Send available options
-    // uci.send()?;
+    for (name, field) in options.iter() {
+        writer.send_message(UciMessage::Option {
+            name: name.clone(),
+            field: field.clone(),
+        })?
+    }
+
     // Everything ready!
     writer.send_message(UciMessage::Initialized)
 }

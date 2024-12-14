@@ -8,7 +8,7 @@ use std::{
         Arc, Mutex,
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use node::Node;
@@ -19,7 +19,7 @@ use crate::{
         action::{Action, LegalAction},
         position::Position,
     },
-    protocols::uci::{commands::UciSearchParameters, endpoint::UciWriter},
+    protocols::uci::{endpoint::UciWriter, search::UciSearchParameters},
 };
 
 mod node;
@@ -27,7 +27,7 @@ mod worker;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchConfig {
-    max_duration: Duration,
+    max_duration: (Duration, Duration),
     max_depth: u8,
     actions: Vec<Action>,
     max_nodes: u64,
@@ -37,7 +37,7 @@ pub struct SearchConfig {
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            max_duration: Duration::MAX,
+            max_duration: (Duration::MAX, Duration::MAX),
             max_depth: u8::MAX,
             max_nodes: u64::MAX,
             actions: vec![],
@@ -57,7 +57,7 @@ impl SearchConfig {
     ///
     /// Note that this overrides the value set with [`SearchConfig::with_time_constraints`].
     pub fn with_max_duration(mut self, duration: Duration) -> Self {
-        self.max_duration = duration;
+        self.max_duration = (duration, duration);
         self
     }
 
@@ -67,8 +67,26 @@ impl SearchConfig {
         white_increment: Option<Duration>,
         black_increment: Option<Duration>,
         moves_before_time_control: Option<u8>,
-    ) -> Duration {
-        todo!()
+    ) -> (Duration, Duration) {
+        // TODO: this is naive, should upgrade someday
+        const EXPECTED_GAME_DURATION: u8 = 64;
+
+        let total_black_time = black_time + black_increment.unwrap_or(Duration::ZERO);
+        let total_white_time = white_time + white_increment.unwrap_or(Duration::ZERO);
+
+        let black_max_allocated = black_time.as_secs_f32()
+            / moves_before_time_control.unwrap_or(EXPECTED_GAME_DURATION) as f32;
+        let white_max_allocated = white_time.as_secs_f32()
+            / moves_before_time_control.unwrap_or(EXPECTED_GAME_DURATION) as f32;
+
+        let black_time_disadvantage =
+            total_black_time.as_secs_f32() / total_white_time.as_secs_f32();
+        let white_time_disadvantage =
+            total_white_time.as_secs_f32() / total_black_time.as_secs_f32();
+
+        let black_time = Duration::from_secs_f32(black_max_allocated * black_time_disadvantage);
+        let white_time = Duration::from_secs_f32(white_max_allocated * white_time_disadvantage);
+        (black_time, white_time)
     }
 
     /// Computes the appropriate search duration given time constraints for both sides.
@@ -130,7 +148,6 @@ impl SearchConfig {
         let root = Node::new_root();
         let current_nodes = Arc::new(AtomicU64::new(0));
         let should_stop = Arc::new(AtomicBool::new(false));
-        let start_time = Instant::now();
         let workers = (0u32..self.threads)
             .map(|id| {
                 let root = root.clone();
@@ -139,21 +156,15 @@ impl SearchConfig {
                 let current_nodes = current_nodes.clone();
                 let writer = writer.clone();
                 std::thread::spawn(move || {
-                    MctsWorker {
-                        id,
-                        root,
-                        max_depth: self.max_depth,
-                        reached_depth: 0,
-                        depth: 0,
-                        max_duration: self.max_duration,
-                        max_nodes: self.max_nodes,
-                        current_nodes,
-                        should_stop,
-                        start_time,
-                        writer,
-                    }
-                    .search(position);
-                    return;
+                    MctsWorker::init(id, root, current_nodes, should_stop, writer)
+                        .with_max_depth(self.max_depth)
+                        .with_max_duration(if position.side_to_move().is_black() {
+                            self.max_duration.0
+                        } else {
+                            self.max_duration.1
+                        })
+                        .with_max_nodes(self.max_nodes)
+                        .search(position);
                 })
             })
             .collect();
@@ -185,7 +196,7 @@ impl From<UciSearchParameters> for SearchConfig {
             }
 
             if let Some(search_time) = value.search_time {
-                config.max_duration = search_time
+                config.max_duration = (search_time, search_time)
             } else if let Some(white_time) = value.white_time {
                 config.max_duration = Self::compute_time_constraint(
                     white_time,

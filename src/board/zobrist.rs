@@ -35,25 +35,12 @@ pub fn piece_hash<const BLACK_PIECE: bool>(kind: PieceKind, square: Square) -> u
         ZOBRIST_KEYS[piece_offset]
     }
 }
+
+pub const CASTLING_RIGHTS_OFFSET: usize = 64 * 12 + 1;
+
 #[inline(always)]
 pub fn side_to_move_hash() -> u64 {
     ZOBRIST_KEYS[64 * 12]
-}
-#[inline(always)]
-pub fn queenside_right_hash<const BLACK: bool>() -> u64 {
-    if BLACK {
-        ZOBRIST_KEYS[64 * 12 + 4]
-    } else {
-        ZOBRIST_KEYS[64 * 12 + 2]
-    }
-}
-#[inline(always)]
-pub fn kingside_right_hash<const BLACK: bool>() -> u64 {
-    if BLACK {
-        ZOBRIST_KEYS[64 * 12 + 3]
-    } else {
-        ZOBRIST_KEYS[64 * 12 + 1]
-    }
 }
 #[inline(always)]
 pub fn en_passant_file_hash(file: File) -> u64 {

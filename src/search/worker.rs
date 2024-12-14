@@ -13,6 +13,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     board::position::Position,
+    brain::nnue::{self, NnueAccumulator},
     protocols::uci::{
         commands::{UciInformation, UciMessage},
         endpoint::UciWriter,
@@ -35,10 +36,55 @@ pub struct MctsWorker<O: Write> {
     pub current_nodes: Arc<AtomicU64>,
     pub should_stop: Arc<AtomicBool>,
 
+    // Policy
+    pub accumulator: NnueAccumulator<'static>,
+
     // Output to UCI
     pub writer: Arc<Mutex<UciWriter<O>>>,
 }
 impl<O: Write> MctsWorker<O> {
+    /// Creates a new [`MctsWorker`] with no search limits.
+    pub fn init(
+        id: u32,
+        root: Arc<Node>,
+        current_nodes: Arc<AtomicU64>,
+        should_stop: Arc<AtomicBool>,
+        writer: Arc<Mutex<UciWriter<O>>>,
+    ) -> Self {
+        Self {
+            id,
+            root,
+            current_nodes,
+            should_stop,
+            writer,
+            reached_depth: 0,
+            max_depth: u8::MAX,
+            depth: 0,
+            max_duration: Duration::MAX,
+            start_time: Instant::now(),
+            max_nodes: u64::MAX,
+            accumulator: nnue::get_accumulator(),
+        }
+    }
+
+    /// Sets the maximum depth this worker is allowed to search.
+    pub fn with_max_depth(mut self, depth: u8) -> Self {
+        self.max_depth = depth;
+        self
+    }
+
+    /// Sets the maximum duration for which this worker is allowed to search.
+    pub fn with_max_duration(mut self, duration: Duration) -> Self {
+        self.max_duration = duration;
+        self
+    }
+
+    /// Sets the number of nodes after which this worker should stop searching.
+    pub fn with_max_nodes(mut self, nodes: u64) -> Self {
+        self.max_nodes = nodes;
+        self
+    }
+
     /// Runs the search on this worker's search tree.
     pub fn search(mut self, mut position: Position) {
         let mut info_tick = Instant::now();
@@ -47,7 +93,8 @@ impl<O: Write> MctsWorker<O> {
             self.depth = 0;
             let selected = self.select(self.root.clone(), &mut position);
             let expanded = self.expand(selected, &mut position);
-            let reward = Self::playout(&mut position);
+            let reward = Self::_playout(&mut position);
+            let _reward = nnue::forward(&self.accumulator, position.side_to_move());
             Self::backup(expanded, reward, &mut position);
 
             if self.depth > self.reached_depth {
@@ -66,7 +113,7 @@ impl<O: Write> MctsWorker<O> {
 
         if self.id == 0 {
             self.send_info().unwrap();
-            self.root.best_move().map(|m| {
+            if let Some(m) = self.root.best_move() {
                 self.writer
                     .lock()
                     .unwrap()
@@ -75,7 +122,7 @@ impl<O: Write> MctsWorker<O> {
                         ponder_on: None,
                     })
                     .unwrap()
-            });
+            }
         }
     }
 
@@ -112,7 +159,7 @@ impl<O: Write> MctsWorker<O> {
         }
     }
 
-    fn playout(position: &mut Position) -> f32 {
+    fn _playout(position: &mut Position) -> f32 {
         let mut actions_played = 0;
         let original = position.clone();
         let value = loop {
@@ -128,7 +175,7 @@ impl<O: Write> MctsWorker<O> {
                 break if check && actions_played % 2 == 0 {
                     -1.
                 } else if check {
-                    -1.
+                    1.
                 } else {
                     -0.1
                 };

@@ -20,6 +20,31 @@ impl PieceKind {
     pub fn is_orthogonal_slider(self) -> bool {
         (self as u8 + 3) & 0b110 == 0b110
     }
+
+    /// Iterator over all piece kinds.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        [
+            PieceKind::Pawn,
+            PieceKind::Knight,
+            PieceKind::Bishop,
+            PieceKind::Rook,
+            PieceKind::Queen,
+            PieceKind::King,
+        ]
+        .into_iter()
+    }
+
+    /// Iterator over all piece kinds except the king.
+    pub fn iter_all_but_king() -> impl Iterator<Item = Self> {
+        [
+            PieceKind::Pawn,
+            PieceKind::Knight,
+            PieceKind::Bishop,
+            PieceKind::Rook,
+            PieceKind::Queen,
+        ]
+        .into_iter()
+    }
 }
 impl std::fmt::Display for PieceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

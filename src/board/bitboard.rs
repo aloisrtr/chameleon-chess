@@ -1,7 +1,7 @@
 //! Bitboards are an efficient way to represent sets of up to 64 elements,
 //! and are used extensively in the board representation.
 
-use std::{iter::FusedIterator, u8};
+use std::iter::FusedIterator;
 
 use super::square::{Delta, Square};
 

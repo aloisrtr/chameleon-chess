@@ -187,7 +187,11 @@ impl LegalAction {
     #[inline(always)]
     pub const fn is_promotion(self) -> Option<PieceKind> {
         if self.0 & Self::PROMOTION != 0 {
-            Some(unsafe { std::mem::transmute(((self.0 & Self::PROMOTING_PIECE) >> 12) as u8 + 1) })
+            Some(unsafe {
+                std::mem::transmute::<u8, PieceKind>(
+                    ((self.0 & Self::PROMOTING_PIECE) >> 12) as u8 + 1,
+                )
+            })
         } else {
             None
         }

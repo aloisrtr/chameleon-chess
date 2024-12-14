@@ -6,6 +6,6 @@
 //! binary for analysis or competitions.
 
 pub mod board;
-// pub mod brain;
+pub mod brain;
 pub mod protocols;
 pub mod search;
