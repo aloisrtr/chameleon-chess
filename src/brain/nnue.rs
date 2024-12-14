@@ -49,7 +49,7 @@ impl<'a> NnueAccumulator<'a> {
         for &feature in active_features {
             for i in 0..LAYER_1_OUT {
                 self.accumulator[perspective as usize][i] +=
-                    self.layer.weights[feature as usize][i];
+                    self.layer.weights[feature as usize * LAYER_1_OUT + i];
             }
         }
     }
@@ -63,12 +63,14 @@ impl<'a> NnueAccumulator<'a> {
     ) {
         for &feature in added_features {
             for i in 0..LAYER_1_OUT {
-                self.accumulator[perspective as usize][i] += self.layer.weights[feature as usize][i]
+                self.accumulator[perspective as usize][i] +=
+                    self.layer.weights[feature as usize * LAYER_1_OUT + i]
             }
         }
         for &feature in removed_features {
             for i in 0..LAYER_1_OUT {
-                self.accumulator[perspective as usize][i] -= self.layer.weights[feature as usize][i]
+                self.accumulator[perspective as usize][i] -=
+                    self.layer.weights[feature as usize * LAYER_1_OUT + i]
             }
         }
     }
@@ -114,14 +116,14 @@ impl Nnue {
 
 struct LinearLayer<const IN: usize, const OUT: usize> {
     pub bias: Vec<f32>,
-    pub weights: Vec<Vec<f32>>,
+    pub weights: Vec<f32>,
 }
 impl<const IN: usize, const OUT: usize> LinearLayer<IN, OUT> {
     /// Initializes a [`LinearLayer`] with all weights and biases set to 0.
     pub fn blank() -> Self {
         Self {
             bias: vec![0.; OUT],
-            weights: vec![vec![0.; OUT]; IN],
+            weights: vec![0.; OUT * IN],
         }
     }
 
@@ -131,7 +133,7 @@ impl<const IN: usize, const OUT: usize> LinearLayer<IN, OUT> {
 
         for (j, output) in output.iter_mut().enumerate() {
             for (i, input) in input.iter().enumerate() {
-                *output += input * self.weights[i][j];
+                *output += input * self.weights[i * OUT + j];
             }
         }
 
