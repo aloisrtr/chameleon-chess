@@ -1,13 +1,13 @@
 //! # UCI Commands/Messages
 //! These are commands/messages that can be sent to another UCI compatible program.
 
-use crate::{
-    game::{action::Action, score::CentiPawns},
-    protocols::uci::options::UciValue,
-};
+use crate::game::{action::Action, score::CentiPawns};
 use std::{borrow::Cow, collections::BTreeMap, time::Duration};
 
-use super::{options::UciOptionField, search::UciSearchParameters};
+use super::{
+    options::{UciOptionField, UciValue},
+    search::UciSearchParameters,
+};
 
 /// Commands that can be received by the client (engine) from the server.
 #[derive(Clone, PartialEq, Eq, Debug)]

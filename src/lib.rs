@@ -7,5 +7,5 @@
 
 pub mod brain;
 pub mod game;
-pub mod protocols;
 pub mod search;
+pub mod uci;

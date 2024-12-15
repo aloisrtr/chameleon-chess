@@ -19,7 +19,7 @@ use crate::{
         action::{Action, LegalAction},
         position::Position,
     },
-    protocols::uci::{endpoint::UciWriter, search::UciSearchParameters},
+    uci::{endpoint::UciWriter, search::UciSearchParameters},
 };
 
 mod node;

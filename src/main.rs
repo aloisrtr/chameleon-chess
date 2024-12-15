@@ -1,6 +1,6 @@
 #[cfg(feature = "perft")]
 use chameleon_chess::game::perft::PerftConfig;
-use chameleon_chess::{game::position::Position, protocols::uci::uci_client};
+use chameleon_chess::{game::position::Position, uci::uci_client};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
