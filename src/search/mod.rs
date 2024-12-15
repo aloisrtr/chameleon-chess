@@ -145,7 +145,7 @@ impl SearchConfig {
         position: Position,
         writer: Arc<Mutex<UciWriter<O>>>,
     ) -> SearchHandle {
-        let root = Node::new_root();
+        let root = Node::new_root(position.side_to_move());
         let current_nodes = Arc::new(AtomicU64::new(0));
         let should_stop = Arc::new(AtomicBool::new(false));
         let workers = (0u32..self.threads)

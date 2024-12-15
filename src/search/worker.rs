@@ -13,14 +13,14 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     brain::nnue::{self, NnueAccumulator},
-    game::{position::Position, score::*},
+    game::{colour::Colour, position::Position, score::*},
     uci::{
         commands::{UciInformation, UciMessage},
         endpoint::UciWriter,
     },
 };
 
-use super::node::Node;
+use super::node::{Node, Value};
 
 pub struct MctsWorker<O: Write> {
     pub id: u32,
@@ -28,6 +28,7 @@ pub struct MctsWorker<O: Write> {
     pub reached_depth: u8,
     pub max_depth: u8,
     pub depth: u8,
+    pub perspective: Colour,
 
     // Search budget
     pub max_duration: Duration,
@@ -57,6 +58,7 @@ impl<O: Write> MctsWorker<O> {
             current_nodes,
             should_stop,
             writer,
+            perspective: Colour::White,
             reached_depth: 0,
             max_depth: u8::MAX,
             depth: 0,
@@ -87,15 +89,35 @@ impl<O: Write> MctsWorker<O> {
 
     /// Runs the search on this worker's search tree.
     pub fn search(mut self, mut position: Position) {
+        self.perspective = position.side_to_move();
         let mut info_tick = Instant::now();
         while self.within_budget() {
             let original = position.clone();
             self.depth = 0;
-            let selected = self.select(self.root.clone(), &mut position);
-            let expanded = self.expand(selected, &mut position);
-            let reward = Self::_playout(&mut position);
-            let _reward = nnue::forward(&self.accumulator, position.side_to_move());
-            Self::backup(expanded, reward, &mut position);
+            let (selected, expandable) = self.select(self.root.clone(), &mut position);
+            let reward = if expandable {
+                let expanded = self.expand(selected.clone(), &mut position);
+                let reward = self.playout(&mut position);
+                expanded.update_value(reward);
+                reward
+            } else {
+                if selected.value().is_certain() {
+                    selected.value()
+                } else if position.fifty_move_draw() || position.threefold_repetition() {
+                    Value::Draw
+                } else {
+                    let (actions, check) = position.actions();
+                    if actions.is_empty() && check {
+                        Value::Win(position.side_to_move().inverse())
+                    } else if actions.is_empty() {
+                        Value::Draw
+                    } else {
+                        panic!("Cannot guess value of position\n{position}");
+                    }
+                }
+            };
+            Self::backup(selected, reward, &mut position);
+            // let _reward = nnue::forward(&self.accumulator, position.side_to_move());
 
             if self.depth > self.reached_depth {
                 self.reached_depth = self.depth
@@ -135,64 +157,70 @@ impl<O: Write> MctsWorker<O> {
     }
 
     /// Selects the most promising leaf node.
-    fn select(&mut self, mut node: Arc<Node>, position: &mut Position) -> Arc<Node> {
-        while node.is_fully_expanded()
-            && !(position.threefold_repetition() || position.fifty_move_draw())
-        {
+    fn select(&mut self, mut node: Arc<Node>, position: &mut Position) -> (Arc<Node>, bool) {
+        println!("==== SELECTING ====");
+        while node.is_fully_expanded() {
             self.depth += 1;
-            node = node.most_promising_child();
-            position.make_legal(node.action().unwrap())
+            let Some(child) = node.most_promising_child() else {
+                println!("Node\n{position}\nhas no most promising child");
+                println!("==== END SELECTING ====");
+                return (node, false);
+            };
+            node = child.clone();
+            // node.add_virtual_loss();
+            position.make_legal(node.action().unwrap());
+            println!("{position}");
         }
-        node
+        println!("==== END SELECTING ====");
+        (node, true)
     }
 
     fn expand(&self, node: Arc<Node>, position: &mut Position) -> Arc<Node> {
-        if position.threefold_repetition() || position.fifty_move_draw() {
-            return node;
-        }
+        println!("==== EXPANDING ====");
         Node::init_children(node.clone(), position);
-        if let Some(node) = node.add_child() {
+        let n = if let Some(node) = node.add_child() {
             self.current_nodes.fetch_add(1, Ordering::Relaxed);
             position.make_legal(node.action().unwrap());
+            println!("{position}");
             node
         } else {
+            println!("==== TERMINAL NODE ====");
             node
-        }
+        };
+        println!("==== END EXPANDING ====");
+        n
     }
 
-    fn _playout(position: &mut Position) -> f32 {
-        let mut actions_played = 0;
+    fn playout(&self, position: &mut Position) -> Value {
         let original = position.clone();
         let value = loop {
             if position.fifty_move_draw() || position.threefold_repetition() {
-                break -0.1;
+                break Value::Draw;
             }
 
             let (actions, check) = position.actions();
             if let Some(action) = actions.choose(&mut thread_rng()) {
                 position.make_legal(*action);
-                actions_played += 1;
             } else {
-                break if check && actions_played % 2 == 0 {
-                    -1.
-                } else if check {
-                    1.
+                break if check {
+                    Value::Win(position.side_to_move().inverse())
                 } else {
-                    -0.1
+                    Value::Draw
                 };
             }
         };
+
+        println!("==== PLAYOUT: {value:?} ====");
 
         *position = original;
         value
     }
 
-    fn backup(node: Arc<Node>, mut delta: f32, position: &mut Position) {
+    fn backup(node: Arc<Node>, value: Value, position: &mut Position) {
         let mut current_node = Some(node);
-        delta = -delta;
         while let Some(node) = current_node.take() {
-            node.modify_score(delta);
-            delta = -delta;
+            // node.remove_virtual_loss();
+            node.update_value(value);
             current_node = node.parent();
             position.unmake()
         }
@@ -211,6 +239,7 @@ impl<O: Write> MctsWorker<O> {
                     mv: self
                         .root
                         .most_promising_child()
+                        .unwrap()
                         .action()
                         .unwrap()
                         .downgrade(),
@@ -228,6 +257,10 @@ impl<O: Write> MctsWorker<O> {
                     centipawns: win_probability_to_centipawns(self.root.exploitation_score()),
                     is_upper_bound: None,
                 },
+                UciInformation::SearchSpeed(
+                    self.current_nodes.load(Ordering::Relaxed)
+                        / self.start_time.elapsed().as_secs(),
+                ),
             ]))
     }
 

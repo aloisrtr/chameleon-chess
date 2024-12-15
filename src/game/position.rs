@@ -43,7 +43,7 @@ pub enum FenError {
 
 /// Represents a valid chess position and defines an API to interact with said
 /// position (making, unmaking, generating moves, etc).
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct Position {
     // 8x8 array to find which piece sits on which square.
     pieces: [Option<PieceKind>; 64],
@@ -1242,7 +1242,7 @@ impl std::hash::Hash for Position {
         self.hash.hash(state)
     }
 }
-impl std::fmt::Display for Position {
+impl std::fmt::Debug for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, square) in Square::squares_fen_iter().enumerate() {
             if i % 8 == 0 && i != 0 {
@@ -1287,6 +1287,11 @@ impl std::fmt::Display for Position {
         }
 
         writeln!(f, "\nfen: {}", self.fen())
+    }
+}
+impl std::fmt::Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 

@@ -51,7 +51,6 @@ pub fn uci_client() -> std::io::Result<()> {
     'uci: loop {
         match reader.read_command() {
             Ok(Some(cmd)) => {
-                log::info!("Received command {cmd:?}");
                 match cmd {
                     UciCommand::Initialize => initialize_engine(&writer, &options)?,
                     UciCommand::IsReady => send_message(&writer, UciMessage::Ready)?,
@@ -72,10 +71,15 @@ pub fn uci_client() -> std::io::Result<()> {
                         };
                         for m in moves {
                             if position.make(m).is_err() {
-                                log::error!("Illegal move in position command: {m}");
+                                send_debug_message(
+                                    &writer,
+                                    format!("Illegal move in position command: {m}, quitting"),
+                                    debug,
+                                )?;
                                 panic!();
                             }
                         }
+                        send_debug_message(&writer, format!("{position}"), debug)?
                     }
                     UciCommand::StartSearch(params) => {
                         if let Some(mut handle) = search_handle.take() {
