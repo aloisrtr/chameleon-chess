@@ -71,21 +71,23 @@ impl SearchConfig {
         // TODO: this is naive, should upgrade someday
         const EXPECTED_GAME_DURATION: u8 = 64;
 
-        let total_black_time = black_time + black_increment.unwrap_or(Duration::ZERO);
         let total_white_time = white_time + white_increment.unwrap_or(Duration::ZERO);
+        let total_black_time = black_time + black_increment.unwrap_or(Duration::ZERO);
 
         let black_max_allocated = black_time.as_secs_f32()
-            / moves_before_time_control.unwrap_or(EXPECTED_GAME_DURATION) as f32;
+            / (moves_before_time_control.unwrap_or(EXPECTED_GAME_DURATION) + 1) as f32;
         let white_max_allocated = white_time.as_secs_f32()
-            / moves_before_time_control.unwrap_or(EXPECTED_GAME_DURATION) as f32;
+            / (moves_before_time_control.unwrap_or(EXPECTED_GAME_DURATION) + 1) as f32;
 
         let black_time_disadvantage =
             total_black_time.as_secs_f32() / total_white_time.as_secs_f32();
         let white_time_disadvantage =
             total_white_time.as_secs_f32() / total_black_time.as_secs_f32();
 
-        let black_time = Duration::from_secs_f32(black_max_allocated * black_time_disadvantage);
-        let white_time = Duration::from_secs_f32(white_max_allocated * white_time_disadvantage);
+        let black_time = Duration::from_secs_f32(black_max_allocated * black_time_disadvantage)
+            .min(Duration::from_secs(10));
+        let white_time = Duration::from_secs_f32(white_max_allocated * white_time_disadvantage)
+            .min(Duration::from_secs(10));
         (black_time, white_time)
     }
 

@@ -102,20 +102,6 @@ pub fn uci_client() -> std::io::Result<()> {
                     UciCommand::StopSearch => {
                         if let Some(mut handle) = search_handle.take() {
                             handle.stop();
-                            match handle.best_action() {
-                                Some(best) => send_message(
-                                    &writer,
-                                    UciMessage::SearchResult {
-                                        best: best.downgrade(),
-                                        ponder_on: None,
-                                    },
-                                )?,
-                                None => send_debug_message(
-                                    &writer,
-                                    "Did not find any moves to play",
-                                    debug,
-                                )?,
-                            }
                         }
                     }
                     UciCommand::PonderHit => todo!("pondering is not yet implemented"),
@@ -137,10 +123,10 @@ fn setup_options() -> BTreeMap<String, UciOptionField> {
     options.insert(
         "SearchWorkers".to_string(),
         UciOptionField::IntegerRange {
-            actual: num_cpus::get_physical() as i32,
-            default: num_cpus::get_physical() as i32,
+            actual: 1,
+            default: 1,
             min: 1,
-            max: num_cpus::get() as i32,
+            max: num_cpus::get_physical() as i32,
         },
     );
     options

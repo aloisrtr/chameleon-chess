@@ -11,29 +11,26 @@ use crate::game::{action::LegalAction, colour::Colour, position::Position};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
     WinProbability {
-        score: f32,
-        visits: u32,
-        colour: Colour,
+        wins: i32,
+        samples: u32,
+        perspective: Colour,
     },
     Win(Colour),
     Draw,
 }
 impl Value {
-    pub fn is_certain(self) -> bool {
-        matches!(self, Self::Win(_) | Self::Draw)
-    }
-
     pub fn exploitation_score(self, perspective: Colour) -> f32 {
         match self {
             Self::WinProbability {
-                score,
-                visits,
-                colour,
+                wins,
+                samples,
+                perspective: p,
             } => {
-                if perspective == colour {
-                    score / visits as f32
+                let win_probability = wins as f32 / samples as f32;
+                if perspective == p {
+                    win_probability
                 } else {
-                    -score / visits as f32
+                    -win_probability
                 }
             }
             Self::Draw => 0.,
@@ -119,9 +116,13 @@ impl Node {
                 }
                 actions_count += 1;
             }
-            node.non_expanded_children
-                .store(actions_count, Ordering::SeqCst);
-            node.expandable.store(true, Ordering::Release)
+            if actions_count >= 0 {
+                node.non_expanded_children
+                    .store(actions_count, Ordering::SeqCst);
+                node.expandable.store(true, Ordering::Release)
+            } else {
+                node.fully_expanded.store(true, Ordering::SeqCst)
+            }
         }
     }
 
@@ -130,6 +131,7 @@ impl Node {
         if self.expandable.load(Ordering::Acquire) {
             let i: i16 = self.non_expanded_children.fetch_sub(1, Ordering::SeqCst);
             if i == 0 {
+                self.expandable.store(true, Ordering::SeqCst);
                 self.fully_expanded.store(true, Ordering::SeqCst)
             }
             if i < 0 {
@@ -147,22 +149,29 @@ impl Node {
         self.fully_expanded.load(Ordering::SeqCst)
     }
 
+    fn wins_and_visits(&self) -> (i32, u32) {
+        let wv = self.score_visits.load(Ordering::SeqCst);
+        let wins = (wv >> 32) as i32;
+        let visits = (wv & 0xFFFFFFFF) as u32;
+        (wins, visits)
+    }
+
     /// Returns the value of this node.
     pub fn value(&self) -> Value {
-        let sv = self.score_visits.load(Ordering::SeqCst);
-        let score = f32::from_bits((sv >> 32) as u32);
-        let visits = (sv & 0xFFFFFFFF) as u32;
-        if score.is_nan() {
-            Value::Draw
-        } else if score == f32::INFINITY {
-            Value::Win(self.perspective)
-        } else if score == f32::NEG_INFINITY {
-            Value::Win(self.perspective.inverse())
+        let (wins, visits) = self.wins_and_visits();
+        if visits == u32::MAX {
+            if wins == 0 {
+                Value::Draw
+            } else if wins > 0 {
+                Value::Win(self.perspective)
+            } else {
+                Value::Win(self.perspective.inverse())
+            }
         } else {
             Value::WinProbability {
-                score,
-                visits,
-                colour: self.perspective,
+                wins,
+                samples: visits,
+                perspective: self.perspective,
             }
         }
     }
@@ -170,23 +179,29 @@ impl Node {
     /// Modifies the value of this node by adding delta of value or setting it
     /// to a known value.
     pub fn update_value(&self, value: Value) {
-        let (score, visits) = match value {
+        let (wins, samples) = match value {
             Value::WinProbability {
-                score,
-                visits,
-                colour,
-            } => {
-                let score = if colour == self.perspective {
-                    score
+                wins,
+                samples,
+                perspective,
+            } => (
+                if perspective == self.perspective {
+                    wins
                 } else {
-                    -score
-                };
-                (score, visits)
+                    -wins
+                },
+                samples,
+            ),
+            Value::Win(colour) => {
+                if colour == self.perspective {
+                    (1, 1)
+                } else {
+                    (-1, 1)
+                }
             }
-            Value::Win(colour) => (if colour == self.perspective { 1. } else { -1. }, 1),
-            Value::Draw => (0., 1),
+            Value::Draw => (0, 1),
         };
-        let sv = (score.to_bits() as u64) << 32 | visits as u64;
+        let sv = (wins as u64) << 32 | samples as u64;
         self.score_visits.fetch_add(sv, Ordering::SeqCst);
     }
 
@@ -200,36 +215,17 @@ impl Node {
         self.score_visits.fetch_sub(1, Ordering::SeqCst);
     }
 
-    /// Returns the exploitation score of this node.
-    pub fn exploitation_score(&self) -> f32 {
-        self.value().exploitation_score(self.perspective)
-    }
-
     /// Returns the UCT score of this node.
     pub fn uct(&self, parent_visits: u32) -> f32 {
-        if let Value::WinProbability { visits, .. } = self.value() {
-            let exploitation = self.exploitation_score();
-            let exploration = ((2f32 * (parent_visits as f32).ln()) / visits as f32).sqrt();
-            exploitation + 2f32.sqrt() * exploration
-        } else {
-            self.value().exploitation_score(self.perspective)
-        }
+        let (wins, visits) = self.wins_and_visits();
+        let exploitation = -wins as f32 / visits as f32;
+        let exploration = ((2f32 * (parent_visits as f32).ln()) / visits as f32).sqrt();
+        exploitation + 2f32.sqrt() * exploration
     }
 
     /// Returns the most promising child according to the UCT formula.
     pub fn most_promising_child(&self) -> Option<&Arc<Self>> {
-        let Value::WinProbability { visits, .. } = self.value() else {
-            let sv = self.score_visits.load(Ordering::SeqCst);
-            let score = f32::from_bits((sv >> 32) as u32);
-            let visits = (sv & 0xFFFFFFFF) as u32;
-            println!(
-                "Score is not a win probability: {:?}, score: {}, visits: {}",
-                self.value(),
-                score,
-                visits
-            );
-            return None;
-        };
+        let (_, visits) = self.wins_and_visits();
         let children = unsafe { self.children.get().as_ref().unwrap() };
         children
             .iter()
@@ -239,9 +235,11 @@ impl Node {
     /// Returns the best child of this node.
     pub fn best_child(&self) -> Option<&Arc<Self>> {
         let children = unsafe { self.children.get().as_ref().unwrap() };
-        children
-            .iter()
-            .max_by(|c1, c2| c1.exploitation_score().total_cmp(&c2.exploitation_score()))
+        children.iter().max_by(|c1, c2| {
+            c1.value()
+                .exploitation_score(self.perspective)
+                .total_cmp(&c2.value().exploitation_score(self.perspective))
+        })
     }
 
     /// Returns the best move from this node.
@@ -265,6 +263,14 @@ impl Node {
         }
 
         pv
+    }
+
+    pub fn policy(&self) -> Vec<(LegalAction, Value)> {
+        let children = unsafe { self.children.get().as_ref().unwrap() };
+        children
+            .iter()
+            .map(|child| (child.action.unwrap(), child.value()))
+            .collect()
     }
 }
 unsafe impl Send for Node {}

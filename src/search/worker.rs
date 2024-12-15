@@ -13,7 +13,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     brain::nnue::{self, NnueAccumulator},
-    game::{colour::Colour, position::Position, score::*},
+    game::{action::LegalAction, colour::Colour, position::Position, score::*},
     uci::{
         commands::{UciInformation, UciMessage},
         endpoint::UciWriter,
@@ -92,7 +92,6 @@ impl<O: Write> MctsWorker<O> {
         self.perspective = position.side_to_move();
         let mut info_tick = Instant::now();
         while self.within_budget() {
-            let original = position.clone();
             self.depth = 0;
             let (selected, expandable) = self.select(self.root.clone(), &mut position);
             let reward = if expandable {
@@ -101,9 +100,7 @@ impl<O: Write> MctsWorker<O> {
                 expanded.update_value(reward);
                 reward
             } else {
-                if selected.value().is_certain() {
-                    selected.value()
-                } else if position.fifty_move_draw() || position.threefold_repetition() {
+                if position.fifty_move_draw() || position.threefold_repetition() {
                     Value::Draw
                 } else {
                     let (actions, check) = position.actions();
@@ -112,7 +109,7 @@ impl<O: Write> MctsWorker<O> {
                     } else if actions.is_empty() {
                         Value::Draw
                     } else {
-                        panic!("Cannot guess value of position\n{position}");
+                        selected.value()
                     }
                 }
             };
@@ -130,7 +127,6 @@ impl<O: Write> MctsWorker<O> {
                 }
                 self.send_current_line().unwrap();
             }
-            assert_eq!(original, position);
         }
 
         if self.id == 0 {
@@ -158,37 +154,27 @@ impl<O: Write> MctsWorker<O> {
 
     /// Selects the most promising leaf node.
     fn select(&mut self, mut node: Arc<Node>, position: &mut Position) -> (Arc<Node>, bool) {
-        println!("==== SELECTING ====");
         while node.is_fully_expanded() {
             self.depth += 1;
             let Some(child) = node.most_promising_child() else {
-                println!("Node\n{position}\nhas no most promising child");
-                println!("==== END SELECTING ====");
                 return (node, false);
             };
             node = child.clone();
             // node.add_virtual_loss();
             position.make_legal(node.action().unwrap());
-            println!("{position}");
         }
-        println!("==== END SELECTING ====");
         (node, true)
     }
 
     fn expand(&self, node: Arc<Node>, position: &mut Position) -> Arc<Node> {
-        println!("==== EXPANDING ====");
         Node::init_children(node.clone(), position);
-        let n = if let Some(node) = node.add_child() {
+        if let Some(node) = node.add_child() {
             self.current_nodes.fetch_add(1, Ordering::Relaxed);
             position.make_legal(node.action().unwrap());
-            println!("{position}");
             node
         } else {
-            println!("==== TERMINAL NODE ====");
             node
-        };
-        println!("==== END EXPANDING ====");
-        n
+        }
     }
 
     fn playout(&self, position: &mut Position) -> Value {
@@ -210,8 +196,6 @@ impl<O: Write> MctsWorker<O> {
             }
         };
 
-        println!("==== PLAYOUT: {value:?} ====");
-
         *position = original;
         value
     }
@@ -227,41 +211,48 @@ impl<O: Write> MctsWorker<O> {
     }
 
     fn send_info(&self) -> std::io::Result<()> {
+        let mut informations = vec![
+            UciInformation::SearchDepth(self.reached_depth),
+            UciInformation::SearchTime(self.start_time.elapsed()),
+            UciInformation::SearchedNodes(self.current_nodes.load(Ordering::Relaxed)),
+            UciInformation::CurrentlySearchedMove {
+                move_index: None,
+                mv: self
+                    .root
+                    .most_promising_child()
+                    .unwrap()
+                    .action()
+                    .unwrap()
+                    .downgrade(),
+            },
+            UciInformation::CentipawnScore {
+                centipawns: win_probability_to_centipawns(
+                    self.root.value().exploitation_score(self.perspective),
+                ),
+                is_upper_bound: None,
+            },
+            UciInformation::SearchSpeed(
+                (self.current_nodes.load(Ordering::Relaxed) as f32
+                    / self.start_time.elapsed().as_secs_f32()) as u64,
+            ),
+        ];
+        let pv: Vec<_> = self
+            .root
+            .principal_variation()
+            .into_iter()
+            .map(LegalAction::downgrade)
+            .collect();
+        if !pv.is_empty() {
+            informations.push(UciInformation::PrincipalVariation {
+                ranking: None,
+                moves: pv,
+            })
+        }
+
         self.writer
             .lock()
             .unwrap()
-            .send_message(UciMessage::Information(vec![
-                UciInformation::SearchDepth(self.reached_depth),
-                UciInformation::SearchTime(self.start_time.elapsed()),
-                UciInformation::SearchedNodes(self.current_nodes.load(Ordering::Relaxed)),
-                UciInformation::CurrentlySearchedMove {
-                    move_index: None,
-                    mv: self
-                        .root
-                        .most_promising_child()
-                        .unwrap()
-                        .action()
-                        .unwrap()
-                        .downgrade(),
-                },
-                UciInformation::PrincipalVariation {
-                    ranking: None,
-                    moves: self
-                        .root
-                        .principal_variation()
-                        .into_iter()
-                        .map(|a| a.downgrade())
-                        .collect(),
-                },
-                UciInformation::CentipawnScore {
-                    centipawns: win_probability_to_centipawns(self.root.exploitation_score()),
-                    is_upper_bound: None,
-                },
-                UciInformation::SearchSpeed(
-                    self.current_nodes.load(Ordering::Relaxed)
-                        / self.start_time.elapsed().as_secs(),
-                ),
-            ]))
+            .send_message(UciMessage::Information(informations))
     }
 
     fn send_current_line(&self) -> std::io::Result<()> {
