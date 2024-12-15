@@ -5,30 +5,30 @@ use crate::{
     game::{action::Action, score::CentiPawns},
     protocols::uci::options::UciValue,
 };
-use std::{collections::BTreeMap, time::Duration};
+use std::{borrow::Cow, collections::BTreeMap, time::Duration};
 
 use super::{options::UciOptionField, search::UciSearchParameters};
 
 /// Commands that can be received by the client (engine) from the server.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub enum UciCommand {
+pub enum UciCommand<'a> {
     Initialize,
     Debug(bool),
     IsReady,
     SetOption {
-        name: String,
+        name: Cow<'a, str>,
         value: UciValue,
     },
     RegisterLater,
     RegisterName(String),
     RegisterCode(u64),
     Register {
-        name: String,
+        name: Cow<'a, str>,
         code: u64,
     },
     NewGame,
     SetPosition {
-        fen: Option<String>,
+        fen: Option<Cow<'a, str>>,
         moves: Vec<Action>,
     },
     StartSearch(UciSearchParameters),
@@ -37,7 +37,7 @@ pub enum UciCommand {
     PonderHit,
     Quit,
 }
-impl std::fmt::Display for UciCommand {
+impl<'a> std::fmt::Display for UciCommand<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Initialize => writeln!(f, "uci"),
@@ -66,7 +66,11 @@ impl std::fmt::Display for UciCommand {
             Self::SetPosition { fen, moves } => writeln!(
                 f,
                 "fen {} moves{}",
-                fen.as_ref().unwrap_or(&String::from("startpos")),
+                if let Some(fen) = fen {
+                    fen.as_ref()
+                } else {
+                    "startpos"
+                },
                 moves
                     .iter()
                     .fold(String::new(), |acc, m| format!("{acc} {m}"))
@@ -78,7 +82,7 @@ impl std::fmt::Display for UciCommand {
         }
     }
 }
-impl std::str::FromStr for UciCommand {
+impl<'a> std::str::FromStr for UciCommand<'a> {
     type Err = ();
 
     /// Parses a UCI command in string format.
@@ -153,7 +157,7 @@ impl std::str::FromStr for UciCommand {
                 }
             }
             "setoption" => {
-                let name = parameters.get("name").map(|v| v.join(" ")).ok_or(())?;
+                let name = Cow::Owned(parameters.get("name").map(|v| v.join(" ")).ok_or(())?);
                 let value = parameters
                     .get("value")
                     .and_then(|v| v.join(" ").parse().ok())
@@ -169,7 +173,7 @@ impl std::str::FromStr for UciCommand {
                 if let Some(name) = name {
                     if let Some(code) = code {
                         UciCommand::Register {
-                            name: String::from_str(&name).unwrap(),
+                            name: Cow::Owned(name),
                             code,
                         }
                     } else {
@@ -182,7 +186,7 @@ impl std::str::FromStr for UciCommand {
                 }
             }
             "position" => {
-                let fen = String::from_str(&parameters.get("fen").ok_or(())?.join(" ")).unwrap();
+                let fen: Cow<'_, str> = Cow::Owned(parameters.get("fen").ok_or(())?.join(" "));
                 let moves = parameters.get("moves").cloned().unwrap_or(vec![]);
                 UciCommand::SetPosition {
                     fen: if fen.is_empty() { None } else { Some(fen) },
@@ -281,7 +285,7 @@ impl std::str::FromStr for UciCommand {
 /// Messages that can be sent by the engine in response to a command or just
 /// for debugging purposes.
 #[derive(Clone, PartialEq, Debug)]
-pub enum UciMessage {
+pub enum UciMessage<'a> {
     Identity {
         name: String,
         author: String,
@@ -296,14 +300,14 @@ pub enum UciMessage {
     CopyrightStatus(bool),
     RegistrationCheck,
     RegistrationStatus(bool),
-    Information(Vec<UciInformation>),
-    Debug(String),
+    Information(Vec<UciInformation<'a>>),
+    Debug(Cow<'a, str>),
     Option {
-        name: String,
+        name: Cow<'a, str>,
         field: UciOptionField,
     },
 }
-impl std::fmt::Display for UciMessage {
+impl<'a> std::fmt::Display for UciMessage<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Identity { name, author } => {
@@ -366,7 +370,7 @@ impl std::fmt::Display for UciMessage {
 
 /// Information that can be sent from the engine to the server.
 #[derive(Clone, PartialEq, Debug)]
-pub enum UciInformation {
+pub enum UciInformation<'a> {
     SearchDepth(u8),
     SelectiveDepth(u8),
     SearchTime(Duration),
@@ -393,7 +397,7 @@ pub enum UciInformation {
     EndgameTableHits(u64),
     ShredderTableHits(u64),
     CpuLoad(f32),
-    Debug(String),
+    String(Cow<'a, str>),
     RefutationLine {
         mv: Action,
         refuted_by: Vec<Action>,
@@ -403,7 +407,7 @@ pub enum UciInformation {
         line: Vec<Action>,
     },
 }
-impl std::fmt::Display for UciInformation {
+impl std::fmt::Display for UciInformation<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::SearchDepth(depth) => write!(f, "depth {depth}"),
@@ -463,7 +467,7 @@ impl std::fmt::Display for UciInformation {
             Self::EndgameTableHits(n) => write!(f, "tbhits {n}"),
             Self::ShredderTableHits(n) => write!(f, "sbhits {n}"),
             Self::CpuLoad(percent) => write!(f, "cpuload {}", (percent * 10000f32) as u16),
-            Self::Debug(str) => write!(f, "string {str}"),
+            Self::String(str) => write!(f, "string {str}"),
             Self::RefutationLine { mv, refuted_by } => write!(
                 f,
                 "refutation {mv}{}",

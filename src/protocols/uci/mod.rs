@@ -18,6 +18,7 @@
 //! UCI uses **long algebraic notation** for moves, i.e. `<from><to>[promotion]`.
 
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     io::Write,
     sync::{Arc, Mutex},
@@ -56,7 +57,7 @@ pub fn uci_client() -> std::io::Result<()> {
                     UciCommand::IsReady => send_message(&writer, UciMessage::Ready)?,
                     UciCommand::Debug(on) => debug = on,
                     UciCommand::SetOption { name, value } => {
-                        if let Some(field) = options.get_mut(&name) {
+                        if let Some(field) = options.get_mut(name.as_ref()) {
                             field.assign(value).unwrap()
                         }
                     }
@@ -155,7 +156,7 @@ fn initialize_engine<O: Write>(
     // Send available options
     for (name, field) in options.iter() {
         writer.send_message(UciMessage::Option {
-            name: name.clone(),
+            name: Cow::Borrowed(name),
             field: field.clone(),
         })?
     }
@@ -171,7 +172,7 @@ fn send_message<O: Write>(
     writer.lock().unwrap().send_message(message)
 }
 
-fn send_debug_message<O: Write, S: Into<String>>(
+fn send_debug_message<O: Write, S: AsRef<str>>(
     writer: &Arc<Mutex<UciWriter<O>>>,
     message: S,
     debug_on: bool,
@@ -180,5 +181,5 @@ fn send_debug_message<O: Write, S: Into<String>>(
         return Ok(());
     }
 
-    send_message(writer, UciMessage::Debug(message.into()))
+    send_message(writer, UciMessage::Debug(Cow::Borrowed(message.as_ref())))
 }
