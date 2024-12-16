@@ -3,7 +3,9 @@
 use std::str::FromStr;
 
 use super::{
+    bitboard::Bitboard,
     colour::Colour,
+    square::Square,
     zobrist::{CASTLING_RIGHTS_OFFSET, ZOBRIST_KEYS},
 };
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -78,6 +80,33 @@ impl CastlingRights {
         }
     }
 
+    /// Allows queenside for a given side.
+    #[inline(always)]
+    pub fn allow_kingside_castle(&mut self, colour: Colour) {
+        self.0 |= if colour.is_black() {
+            Self::KINGSIDE_BLACK
+        } else {
+            Self::KINGSIDE_WHITE
+        }
+    }
+    /// Allows queenside for a given side.
+    #[inline(always)]
+    pub fn allow_queenside_castle(&mut self, colour: Colour) {
+        self.0 |= if colour.is_black() {
+            Self::QUEENSIDE_BLACK
+        } else {
+            Self::QUEENSIDE_WHITE
+        }
+    }
+    /// Allows castling for a given side.
+    pub fn allow(&mut self, colour: Colour) {
+        self.0 |= if colour.is_black() {
+            Self::QUEENSIDE_BLACK | Self::KINGSIDE_BLACK
+        } else {
+            Self::QUEENSIDE_WHITE | Self::KINGSIDE_WHITE
+        }
+    }
+
     /// Returns the Zobrist hash of these castling rights.
     #[inline(always)]
     pub fn zobrist_hash(self) -> u64 {
@@ -89,6 +118,25 @@ impl CastlingRights {
             }
         }
         hash
+    }
+
+    /// Returns the castling mask for rooks.
+    #[inline(always)]
+    pub fn castle_mask(self) -> Bitboard {
+        let mut res = Bitboard::empty();
+        if self.kingside_castle_allowed(Colour::White) {
+            res |= Square::H1.bitboard()
+        }
+        if self.kingside_castle_allowed(Colour::Black) {
+            res |= Square::H8.bitboard()
+        }
+        if self.queenside_castle_allowed(Colour::White) {
+            res |= Square::A1.bitboard()
+        }
+        if self.queenside_castle_allowed(Colour::Black) {
+            res |= Square::A8.bitboard()
+        }
+        res
     }
 }
 impl FromStr for CastlingRights {

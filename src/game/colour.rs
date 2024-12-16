@@ -1,5 +1,7 @@
 //! Colours for each players and their pieces.
 
+pub const NUM_COLOURS: usize = 2;
+
 #[repr(u8)]
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
 pub enum Colour {
@@ -37,5 +39,19 @@ impl Colour {
     #[inline]
     pub const fn is_black(&self) -> bool {
         matches!(self, Colour::Black)
+    }
+}
+impl From<bool> for Colour {
+    fn from(value: bool) -> Self {
+        if value {
+            Self::Black
+        } else {
+            Self::White
+        }
+    }
+}
+impl From<&bool> for Colour {
+    fn from(value: &bool) -> Self {
+        Self::from(*value)
     }
 }

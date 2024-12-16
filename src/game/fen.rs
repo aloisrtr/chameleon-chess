@@ -2,7 +2,14 @@
 
 use crate::game::square::Rank;
 
-use super::{castling_rights::CastlingRights, colour::Colour, piece::PieceKind, square::Square};
+use super::{
+    bitboard::Bitboard,
+    castling_rights::CastlingRights,
+    colour::{Colour, NUM_COLOURS},
+    piece::{PieceKind, NUM_PIECES},
+    square::Square,
+};
+use bitstream_io::{BitRead, BitWrite};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Error)]
@@ -25,7 +32,7 @@ pub enum FenError {
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Fen {
-    pub pieces: [Option<(PieceKind, Colour)>; 64],
+    bitboards: [Bitboard; NUM_COLOURS + NUM_PIECES],
     pub side_to_move: Colour,
     pub castling_rights: CastlingRights,
     pub en_passant: Option<Square>,
@@ -37,6 +44,132 @@ impl Fen {
     pub fn parse(fen: &str) -> Result<Self, FenError> {
         fen.parse()
     }
+
+    /// Returns the piece kind and colour on a given square if any.
+    pub fn piece_on(&self, square: Square) -> Option<(PieceKind, Colour)> {
+        let sq_bb = square.bitboard();
+
+        for kind in PieceKind::iter() {
+            if self.bitboards[kind as usize + 2].intersects(sq_bb) {
+                if self.bitboards[Colour::White as usize].intersects(sq_bb) {
+                    return Some((kind, Colour::White));
+                } else {
+                    return Some((kind, Colour::Black));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Compresses a FEN string for efficient storage.
+    pub fn compress<W: BitWrite>(&self, stream: &mut W) -> std::io::Result<()> {
+        let mut rocc =
+            self.bitboards[Colour::White as usize] | self.bitboards[Colour::Black as usize];
+        stream.write(64, u64::from(rocc))?;
+        stream.write(
+            rocc.cardinality() as u32,
+            u64::from(self.bitboards[Colour::White as usize].pext(rocc)),
+        )?;
+        for piece in PieceKind::iter_all_but_king() {
+            let piece_bb = self.bitboards[piece as usize + 2];
+            stream.write(rocc.cardinality() as u32, u64::from(piece_bb.pext(rocc)))?;
+            rocc ^= piece_bb;
+        }
+        debug_assert_eq!(rocc, self.bitboards[PieceKind::King as usize + 2]);
+
+        stream.write_bit(self.side_to_move.is_black())?;
+
+        stream.write_bit(self.en_passant.is_some())?;
+        let white_candis = (self.bitboards[Colour::White as usize]
+            & self.bitboards[PieceKind::Pawn as usize + 2]
+            & Rank::Four.bitboard())
+            << 8;
+        let black_candis = (self.bitboards[Colour::Black as usize]
+            & self.bitboards[PieceKind::Pawn as usize + 2]
+            & Rank::Six.bitboard())
+            >> 8;
+        let candis = white_candis | black_candis;
+        stream.write(
+            candis.cardinality() as u32,
+            u64::from(
+                self.en_passant
+                    .map(|ep_square| ep_square.bitboard())
+                    .unwrap_or(Bitboard::empty()),
+            ),
+        )?;
+
+        let rooks = self.bitboards[PieceKind::Rook as usize + 2];
+        let castler = self.castling_rights.castle_mask() & rooks;
+        stream.write(rooks.cardinality() as u32, u64::from(castler.pext(rooks)))?;
+
+        stream.write(7, self.halfmove_clock)
+    }
+
+    /// Decompresses a FEN string from a packed storage.
+    pub fn decompress<R: BitRead>(stream: &mut R) -> std::io::Result<Self> {
+        let mut bitboards = [Bitboard::empty(); 8];
+
+        let rocc: Bitboard = stream.read::<u64>(64)?.into();
+        let bb_white: Bitboard =
+            Bitboard::from(stream.read::<u64>(rocc.cardinality() as u32)?).pdep(rocc);
+        bitboards[Colour::White as usize] = bb_white;
+        bitboards[Colour::Black as usize] = bb_white ^ rocc;
+
+        for kind in PieceKind::iter() {
+            let piece_bb =
+                Bitboard::from(stream.read::<u64>(rocc.cardinality() as u32)?).pdep(rocc);
+            rocc ^= piece_bb;
+            bitboards[kind as usize + 2] = piece_bb;
+        }
+        debug_assert!(rocc.is_empty());
+
+        let side_to_move = stream.read_bit()?.into();
+
+        let en_passant = if stream.read_bit()? {
+            let white_candis = (bitboards[Colour::White as usize]
+                & bitboards[PieceKind::Pawn as usize + 2]
+                & Rank::Four.bitboard())
+                << 8;
+            let black_candis = (bitboards[Colour::Black as usize]
+                & bitboards[PieceKind::Pawn as usize + 2]
+                & Rank::Six.bitboard())
+                >> 8;
+            let candis = white_candis | black_candis;
+            let ep_square =
+                Bitboard::from(stream.read::<u64>(candis.cardinality() as u32)?).pdep(candis);
+            ep_square.pop_lowest_set_square()
+        } else {
+            None
+        };
+
+        let rooks = bitboards[PieceKind::Rook as usize + 2];
+        let castlers = Bitboard::from(stream.read::<u64>(rooks.cardinality() as u32)?).pdep(rooks);
+        let mut castling_rights = CastlingRights::none();
+        if castlers.intersects(Square::H1.bitboard()) {
+            castling_rights.allow_kingside_castle(Colour::White)
+        }
+        if castlers.intersects(Square::H8.bitboard()) {
+            castling_rights.allow_kingside_castle(Colour::Black)
+        }
+        if castlers.intersects(Square::A1.bitboard()) {
+            castling_rights.allow_queenside_castle(Colour::White)
+        }
+        if castlers.intersects(Square::A8.bitboard()) {
+            castling_rights.allow_queenside_castle(Colour::Black)
+        }
+
+        let halfmove_clock = stream.read(7)?.into();
+
+        Ok(Fen {
+            bitboards,
+            side_to_move,
+            en_passant,
+            castling_rights,
+            halfmove_clock,
+            fullmove_counter: 1,
+        })
+    }
 }
 impl std::str::FromStr for Fen {
     type Err = FenError;
@@ -46,7 +179,7 @@ impl std::str::FromStr for Fen {
             return Err(FenError::NonAscii);
         }
 
-        let mut pieces = [None; 64];
+        let mut bitboards = [Bitboard::empty(); 8];
         let sections = fen_str.split_ascii_whitespace().collect::<Vec<_>>();
         let pieces_str = sections.first().ok_or(FenError::Incomplete("pieces"))?;
         let mut squares = Square::squares_fen_iter();
@@ -58,28 +191,34 @@ impl std::str::FromStr for Fen {
             };
             match c.to_ascii_lowercase() {
                 'p' => {
-                    pieces[squares.next().ok_or(FenError::TooManySquares)? as usize] =
-                        Some((PieceKind::Pawn, colour))
+                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
+                    bitboards[PieceKind::Pawn as usize + 2] |= sq_bb;
+                    bitboards[colour as usize] |= sq_bb;
                 }
                 'n' => {
-                    pieces[squares.next().ok_or(FenError::TooManySquares)? as usize] =
-                        Some((PieceKind::Knight, colour))
+                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
+                    bitboards[PieceKind::Knight as usize + 2] |= sq_bb;
+                    bitboards[colour as usize] |= sq_bb;
                 }
                 'b' => {
-                    pieces[squares.next().ok_or(FenError::TooManySquares)? as usize] =
-                        Some((PieceKind::Bishop, colour))
+                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
+                    bitboards[PieceKind::Bishop as usize + 2] |= sq_bb;
+                    bitboards[colour as usize] |= sq_bb;
                 }
                 'r' => {
-                    pieces[squares.next().ok_or(FenError::TooManySquares)? as usize] =
-                        Some((PieceKind::Rook, colour))
+                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
+                    bitboards[PieceKind::Rook as usize + 2] |= sq_bb;
+                    bitboards[colour as usize] |= sq_bb;
                 }
                 'q' => {
-                    pieces[squares.next().ok_or(FenError::TooManySquares)? as usize] =
-                        Some((PieceKind::Queen, colour))
+                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
+                    bitboards[PieceKind::Queen as usize + 2] |= sq_bb;
+                    bitboards[colour as usize] |= sq_bb;
                 }
                 'k' => {
-                    pieces[squares.next().ok_or(FenError::TooManySquares)? as usize] =
-                        Some((PieceKind::King, colour))
+                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
+                    bitboards[PieceKind::King as usize + 2] |= sq_bb;
+                    bitboards[colour as usize] |= sq_bb;
                 }
                 '/' => continue,
                 digit if digit.is_ascii_digit() => {
@@ -122,7 +261,7 @@ impl std::str::FromStr for Fen {
         let fullmove_counter = sections.get(5).unwrap_or(&"1").parse().unwrap();
 
         Ok(Self {
-            pieces,
+            bitboards,
             side_to_move,
             castling_rights,
             en_passant,
@@ -137,7 +276,7 @@ impl std::fmt::Display for Fen {
         let mut skip = 0;
         let mut line_length = 0;
         for sq in Square::squares_fen_iter() {
-            if let Some((piece, colour)) = self.pieces[sq as usize] {
+            if let Some((piece, colour)) = self.piece_on(sq) {
                 if skip != 0 {
                     write!(f, "{skip}")?;
                     skip = 0
@@ -188,5 +327,29 @@ impl std::fmt::Display for Fen {
             self.halfmove_clock,
             self.fullmove_counter
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::io::Cursor;
+
+    use bitstream_io::{BigEndian, BitReader, BitWriter};
+
+    use super::*;
+
+    #[test]
+    fn compress_decompress_ok() {
+        let fen: Fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            .parse()
+            .unwrap();
+        let mut buffer = [0u8; 64];
+        let mut writer = BitWriter::endian(Cursor::new(&mut buffer), BigEndian);
+        fen.compress(&mut writer).unwrap();
+
+        let mut reader = BitReader::endian(Cursor::new(&buffer), BigEndian);
+        let result = Fen::decompress(&mut reader).unwrap();
+
+        assert_eq!(fen, result)
     }
 }

@@ -192,6 +192,75 @@ impl Bitboard {
     pub const fn invert(&self) -> Self {
         Self(!self.0)
     }
+
+    /// Architecture independant PEXT (Parallel Bits Extract) implementation.
+    /// Will be slower without the `bmi2` CPU flag.
+    #[inline(always)]
+    pub fn pext(self, mask: Self) -> Self {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if is_x86_feature_detected!("bmi2") {
+                return unsafe { self.pext_inner(mask) };
+            }
+        }
+        let mut res = 0u64;
+        let mut mask = mask.0;
+        let mut bb = 1u64;
+        while mask != 0 {
+            if self.0 & mask & !mask != 0 {
+                res |= bb
+            }
+            mask &= mask - 1;
+            bb += bb
+        }
+        Bitboard(res)
+    }
+
+    /// Architecture independant PDEP (Parallel Bits Deposit) implementation.
+    /// Will be slower without the `bmi2` CPU flag.
+    pub fn pdep(self, mask: Self) -> Self {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if is_x86_feature_detected!("bmi2") {
+                return unsafe { self.pdep_inner(mask) };
+            }
+        }
+        let mut res = 0u64;
+        let mut mask = mask.0;
+        let mut bb = 1u64;
+        while mask != 0 {
+            if self.0 & bb != 0 {
+                res |= mask & !mask
+            }
+            mask &= mask - 1;
+            bb += bb
+        }
+        Bitboard(res)
+    }
+
+    #[target_feature(enable = "bmi2")]
+    unsafe fn pext_inner(self, mask: Self) -> Self {
+        {
+            use std::arch::x86_64::_pext_u64;
+
+            Bitboard(unsafe { _pext_u64(self.0, mask.0) })
+        }
+    }
+
+    #[target_feature(enable = "bmi2")]
+    unsafe fn pdep_inner(self, mask: Self) -> Self {
+        {
+            use std::arch::x86_64::_pdep_u64;
+
+            Bitboard(unsafe { _pdep_u64(self.0, mask.0) })
+        }
+    }
+
+    /// Returns this bitboard as an array of bytes.
+    #[inline]
+    pub const fn as_bytes(self) -> [u8; 8] {
+        self.0.to_be_bytes()
+    }
 }
 
 // [BitAnd] implementations
@@ -351,6 +420,54 @@ impl std::ops::Not for &Bitboard {
     }
 }
 
+// [Shl] implementations
+impl std::ops::Shl<u8> for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn shl(self, rhs: u8) -> Self::Output {
+        Bitboard(self.0 << rhs)
+    }
+}
+impl std::ops::Shl<u8> for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn shl(self, rhs: u8) -> Self::Output {
+        Bitboard(self.0 << rhs)
+    }
+}
+impl std::ops::ShlAssign<u8> for Bitboard {
+    #[inline]
+    fn shl_assign(&mut self, rhs: u8) {
+        self.0 <<= rhs
+    }
+}
+
+// [Shr] implementations
+impl std::ops::Shr<u8> for Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn shr(self, rhs: u8) -> Self::Output {
+        Bitboard(self.0 >> rhs)
+    }
+}
+impl std::ops::Shr<u8> for &Bitboard {
+    type Output = Bitboard;
+
+    #[inline]
+    fn shr(self, rhs: u8) -> Self::Output {
+        Bitboard(self.0 >> rhs)
+    }
+}
+impl std::ops::ShrAssign<u8> for Bitboard {
+    #[inline]
+    fn shr_assign(&mut self, rhs: u8) {
+        self.0 >>= rhs
+    }
+}
+
 // [Add] implementations (shifts).
 impl std::ops::Add<Delta> for Bitboard {
     type Output = Self;
@@ -358,9 +475,9 @@ impl std::ops::Add<Delta> for Bitboard {
     #[inline]
     fn add(self, rhs: Delta) -> Self::Output {
         Self(if 0 < rhs as i8 {
-            self.0 << (rhs as u8)
+            self << (rhs as u8)
         } else {
-            self.0 >> (-(rhs as i8) as u8)
+            self >> (-(rhs as i8) as u8)
         })
     }
 }
@@ -368,9 +485,9 @@ impl std::ops::AddAssign<Delta> for Bitboard {
     #[inline]
     fn add_assign(&mut self, rhs: Delta) {
         if 0 < rhs as i8 {
-            self.0 <<= rhs as u8
+            *self <<= rhs as u8
         } else {
-            self.0 >>= -(rhs as i8) as u8
+            *self >>= -(rhs as i8) as u8
         }
     }
 }
@@ -382,9 +499,9 @@ impl std::ops::Sub<Delta> for Bitboard {
     #[inline]
     fn sub(self, rhs: Delta) -> Self::Output {
         Self(if 0 < rhs as i8 {
-            self.0 >> (rhs as u8)
+            self >> (rhs as u8)
         } else {
-            self.0 << (-(rhs as i8) as u8)
+            self << (-(rhs as i8) as u8)
         })
     }
 }
@@ -392,9 +509,9 @@ impl std::ops::SubAssign<Delta> for Bitboard {
     #[inline]
     fn sub_assign(&mut self, rhs: Delta) {
         if 0 < rhs as i8 {
-            self.0 >>= rhs as u8
+            *self >>= rhs as u8
         } else {
-            self.0 <<= -(rhs as i8) as u8
+            *self <<= -(rhs as i8) as u8
         }
     }
 }
@@ -438,6 +555,27 @@ impl std::fmt::Debug for Bitboard {
             write!(f, "{} ", if self.is_set(square) { 'x' } else { '.' })?
         }
         Ok(())
+    }
+}
+
+impl From<Bitboard> for u64 {
+    fn from(value: Bitboard) -> Self {
+        value.0
+    }
+}
+impl From<&Bitboard> for u64 {
+    fn from(value: &Bitboard) -> Self {
+        value.0
+    }
+}
+impl From<u64> for Bitboard {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+impl From<&u64> for Bitboard {
+    fn from(value: &u64) -> Self {
+        Self(*value)
     }
 }
 

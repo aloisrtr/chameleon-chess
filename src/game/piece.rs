@@ -1,5 +1,7 @@
 //! Piece types in Chess.
 
+pub const NUM_PIECES: usize = 6;
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum PieceKind {
