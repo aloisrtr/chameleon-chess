@@ -160,7 +160,7 @@ impl<O: Write> MctsWorker<O> {
                 return (node, false);
             };
             node = child.clone();
-            // node.add_virtual_loss();
+            node.add_virtual_loss();
             position.make_legal(node.action().unwrap());
         }
         (node, true)
@@ -203,7 +203,7 @@ impl<O: Write> MctsWorker<O> {
     fn backup(node: Arc<Node>, value: Value, position: &mut Position) {
         let mut current_node = Some(node);
         while let Some(node) = current_node.take() {
-            // node.remove_virtual_loss();
+            node.remove_virtual_loss();
             node.update_value(value);
             current_node = node.parent();
             position.unmake()
