@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use node::Node;
+use node::{Node, Value};
 use worker::MctsWorker;
 
 use crate::{
@@ -245,6 +245,13 @@ impl SearchHandle {
         }
     }
 
+    /// Wait for workers to finish their search.
+    pub fn wait(&mut self) {
+        for worker in self.workers.drain(0..self.workers.len()) {
+            worker.join().unwrap();
+        }
+    }
+
     /// Returns the search's current best action.
     pub fn best_action(&self) -> Option<LegalAction> {
         self.root.best_move()
@@ -255,6 +262,10 @@ impl SearchHandle {
     ///
     /// When running a forced checkmate search, this only returns [`Some`] when a mate is found.
     pub fn principal_variation(&self) -> Option<Vec<LegalAction>> {
-        todo!()
+        Some(self.root.principal_variation())
+    }
+
+    pub fn value(&self) -> Value {
+        self.root.value()
     }
 }

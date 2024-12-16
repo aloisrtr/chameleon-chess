@@ -1,4 +1,5 @@
 //! # Utilities to handle scores in Chess (centipawns, win probability, ...)
+
 pub type WinProbability = f32;
 pub type CentiPawns = i32;
 

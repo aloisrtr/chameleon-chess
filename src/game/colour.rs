@@ -10,7 +10,7 @@ impl Colour {
     /// Inverts the colour.
     #[inline]
     pub fn invert(&mut self) {
-        *self = if *self == Colour::Black {
+        *self = if self.is_black() {
             Colour::White
         } else {
             Colour::Black
@@ -19,8 +19,8 @@ impl Colour {
 
     /// Returns the inverse of this colour.
     #[inline]
-    pub fn inverse(&self) -> Self {
-        if *self == Colour::Black {
+    pub const fn inverse(&self) -> Self {
+        if self.is_black() {
             Colour::White
         } else {
             Colour::Black
@@ -29,13 +29,13 @@ impl Colour {
 
     /// Checks if the colour variant is white.
     #[inline]
-    pub fn is_white(&self) -> bool {
-        *self == Colour::White
+    pub const fn is_white(&self) -> bool {
+        matches!(self, Colour::White)
     }
 
     /// Checks if the colour variant is black.
     #[inline]
-    pub fn is_black(&self) -> bool {
-        *self == Colour::Black
+    pub const fn is_black(&self) -> bool {
+        matches!(self, Colour::Black)
     }
 }

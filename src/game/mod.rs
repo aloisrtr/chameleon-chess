@@ -16,3 +16,5 @@ pub mod position;
 pub mod score;
 pub mod square;
 mod zobrist;
+
+pub mod fen;

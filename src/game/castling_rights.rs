@@ -18,23 +18,23 @@ impl CastlingRights {
     const EMPTY: u8 = 0;
 
     /// Full castling rights for both sides.
-    pub fn full() -> Self {
+    pub const fn full() -> Self {
         Self(Self::FULL)
     }
 
     /// No castling rights for any sides.
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self(Self::EMPTY)
     }
 
     /// Checks if no one can castle.
-    pub fn is_none(self) -> bool {
+    pub const fn is_none(self) -> bool {
         self.0 == Self::EMPTY
     }
 
     /// Checks if queenside castling is allowed for a certain colour.
     #[inline(always)]
-    pub fn kingside_castle_allowed(self, colour: Colour) -> bool {
+    pub const fn kingside_castle_allowed(self, colour: Colour) -> bool {
         if colour.is_black() {
             self.0 & Self::KINGSIDE_BLACK != 0
         } else {
@@ -43,7 +43,7 @@ impl CastlingRights {
     }
     /// Checks if kingside castling is allowed for a certain colour.
     #[inline(always)]
-    pub fn queenside_castle_allowed(self, colour: Colour) -> bool {
+    pub const fn queenside_castle_allowed(self, colour: Colour) -> bool {
         if colour.is_black() {
             self.0 & Self::QUEENSIDE_BLACK != 0
         } else {

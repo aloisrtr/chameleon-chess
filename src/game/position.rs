@@ -2,16 +2,15 @@
 //!
 //! This includes making, unmaking and generating moves, defining positions from
 //! FEN strings, etc.
-use std::hint::unreachable_unchecked;
-use thiserror::Error;
-
 use crate::brain::feature::{feature_index, piece_feature_index};
+use std::hint::unreachable_unchecked;
 
 use super::{
     action::{Action, LegalAction},
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::Colour,
+    fen::{Fen, FenError},
     history::HistoryEntry,
     magic_tables::*,
     piece::PieceKind,
@@ -22,24 +21,6 @@ use super::{
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 // TODO: More precise errors
 pub struct IllegalMoveError;
-
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Error)]
-// TODO: Better FEN parsing error reports.
-/// FEN parsing errors.
-pub enum FenError {
-    #[error("Unexpected character at index {index}: {val}")]
-    UnexpectedToken { index: usize, val: char },
-    #[error("FEN string missing the {0} section")]
-    Incomplete(&'static str),
-    #[error("Found a non-ASCII character")]
-    NonAscii,
-    #[error("Failed to parse")]
-    ParseError,
-    #[error("Piece section only defines {0} squares out of 8")]
-    IncompletePieceSection(u8),
-    #[error("The piece section defines too many squares")]
-    TooManySquares,
-}
 
 /// Represents a valid chess position and defines an API to interact with said
 /// position (making, unmaking, generating moves, etc).
@@ -105,175 +86,34 @@ impl Position {
     /// This function returns an error if the FEN string passed is invalid or badly
     /// formatted.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
-        if !fen.is_ascii() {
-            return Err(FenError::NonAscii);
-        }
-
-        let mut position = Self::empty();
-
-        let sections = fen.split_ascii_whitespace().collect::<Vec<_>>();
-        let pieces = sections.first().ok_or(FenError::Incomplete("pieces"))?;
-        let mut squares = Square::squares_fen_iter();
-        for c in pieces.chars() {
-            let colour = if c.is_ascii_lowercase() {
-                Colour::Black
-            } else {
-                Colour::White
-            };
-            unsafe {
-                match c.to_ascii_lowercase() {
-                    'p' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::TooManySquares)?,
-                        PieceKind::Pawn,
-                        colour,
-                    ),
-                    'n' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::TooManySquares)?,
-                        PieceKind::Knight,
-                        colour,
-                    ),
-                    'b' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::TooManySquares)?,
-                        PieceKind::Bishop,
-                        colour,
-                    ),
-                    'r' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::TooManySquares)?,
-                        PieceKind::Rook,
-                        colour,
-                    ),
-                    'q' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::TooManySquares)?,
-                        PieceKind::Queen,
-                        colour,
-                    ),
-                    'k' => position.add_piece_unchecked(
-                        squares.next().ok_or(FenError::TooManySquares)?,
-                        PieceKind::King,
-                        colour,
-                    ),
-                    '/' => continue,
-                    digit if digit.is_ascii_digit() => {
-                        let skip = digit.to_digit(10).unwrap() as usize;
-                        if skip > 8 {
-                            return Err(FenError::UnexpectedToken {
-                                index: 0,
-                                val: digit,
-                            });
-                        }
-                        for _ in 0..skip {
-                            squares.next();
-                        }
-                    }
-                    c => return Err(FenError::UnexpectedToken { index: 0, val: c }),
-                }
-            }
-        }
-
-        position.side_to_move = match *sections
-            .get(1)
-            .ok_or(FenError::Incomplete("Side to move"))?
-        {
-            "w" => Colour::White,
-            "b" => {
-                position.hash ^= zobrist::side_to_move_hash();
-                Colour::Black
-            }
-            _ => return Err(FenError::UnexpectedToken { index: 0, val: '0' }),
-        };
-
-        position.castling_rights = sections
-            .get(2)
-            .ok_or(FenError::Incomplete("Castling rights"))?
-            .parse()
-            .map_err(|_| FenError::ParseError)?;
-
-        position.en_passant_file =
-            match *sections.get(3).ok_or(FenError::Incomplete("En passant"))? {
-                "-" => None,
-                s => {
-                    let file = s
-                        .parse::<Square>()
-                        .map_err(|_| FenError::ParseError)?
-                        .file();
-                    position.hash ^= zobrist::en_passant_file_hash(file);
-                    Some(file)
-                }
-            };
-
-        position.reversible_moves = sections.get(4).unwrap_or(&"0").parse().unwrap();
-
-        position.should_refresh = true;
-
-        Ok(position)
+        let fen: Fen = fen.parse()?;
+        todo!()
     }
 
     /// Returns a FEN string describing the position.
     pub fn fen(&self) -> String {
-        let mut pieces = String::new();
-
-        // Pieces
-        let mut skip = 0;
-        let mut line_length = 0;
-        for sq in Square::squares_fen_iter() {
-            if let Some((piece, colour)) = self.piece_on(sq) {
-                if skip != 0 {
-                    pieces.push(char::from_digit(skip, 10).unwrap());
-                    skip = 0
-                }
-                let mut p = match piece {
-                    PieceKind::Pawn => 'p',
-                    PieceKind::Knight => 'n',
-                    PieceKind::Bishop => 'b',
-                    PieceKind::Rook => 'r',
-                    PieceKind::Queen => 'q',
-                    PieceKind::King => 'k',
-                };
-                if colour == Colour::White {
-                    p = p.to_ascii_uppercase();
-                }
-
-                pieces.push(p)
-            } else {
-                skip += 1
-            }
-
-            line_length = (line_length + 1) % 8;
-            if line_length == 0 {
-                if skip != 0 {
-                    pieces.push(char::from_digit(skip, 10).unwrap());
-                    skip = 0;
-                }
-                if sq.rank() != Rank::One {
-                    pieces.push('/');
-                }
-            }
+        let mut pieces = [None; 64];
+        for (i, dest) in pieces.iter_mut().enumerate() {
+            *dest = self.piece_on(unsafe { Square::from_index_unchecked(i as u8) })
         }
-
-        format!(
-            "{pieces} {} {} {} {} {}",
-            if self.side_to_move.is_black() {
-                'b'
-            } else {
-                'w'
-            },
-            self.castling_rights,
-            if let Some(ep) = self.en_passant_file {
+        Fen {
+            pieces,
+            side_to_move: self.side_to_move,
+            castling_rights: self.castling_rights,
+            en_passant: self.en_passant_file.map(|file| {
                 Square::new(
-                    ep,
+                    file,
                     if self.side_to_move.is_white() {
                         Rank::Six
                     } else {
                         Rank::Three
                     },
                 )
-                .to_string()
-            } else {
-                String::from("-")
-            },
-            self.reversible_moves,
-            (self.history.len() + 1) / 2
-        )
+            }),
+            halfmove_clock: self.reversible_moves as u16,
+            fullmove_counter: (self.history.len() / 2) as u16,
+        }
+        .to_string()
     }
 
     /// Adds a piece on the board on the given square.

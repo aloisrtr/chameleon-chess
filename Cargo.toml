@@ -14,6 +14,8 @@ log = "0.4"
 num_cpus = "1.16"
 rand = { version = "0.8.5", features = ["small_rng"] }
 
+burn = { version = "0.15", features = ["wgpu", "train"], optional = true }
+
 
 [profile.release]
 lto = true
@@ -26,7 +28,8 @@ opt-level = 2
 incremental = true
 
 [features]
-default = ["perft"]
+default = ["perft", "train"]
 perft = []
+train = ["dep:burn"]
 
 

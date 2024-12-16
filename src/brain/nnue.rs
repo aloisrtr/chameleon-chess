@@ -18,27 +18,27 @@ pub fn forward(accumulator: &NnueAccumulator<'static>, perspective: Colour) -> f
     NNUE_NET.forward(accumulator, perspective)
 }
 
-pub const LAYER_1_OUT: usize = 128;
-pub const LAYER_2_OUT: usize = 64;
-pub const OUTPUT_SIZE: usize = 1;
+pub const ACCUMULATOR_OUT: usize = 128;
+pub const HIDDEN_OUT: usize = 64;
+pub const OUTPUT_OUT: usize = 1;
 
 /// Accumulator for the first layer of the NNUE.
 pub struct NnueAccumulator<'a> {
-    accumulator: [[f32; LAYER_1_OUT]; 2],
-    layer: &'a LinearLayer<FEATURES_COUNT, LAYER_1_OUT>,
+    accumulator: [[f32; ACCUMULATOR_OUT]; 2],
+    layer: &'a LinearLayer<FEATURES_COUNT, ACCUMULATOR_OUT>,
 }
 impl<'a> NnueAccumulator<'a> {
-    fn with_layer(layer: &'a LinearLayer<FEATURES_COUNT, LAYER_1_OUT>) -> Self {
+    fn with_layer(layer: &'a LinearLayer<FEATURES_COUNT, ACCUMULATOR_OUT>) -> Self {
         Self {
-            accumulator: [[0.; LAYER_1_OUT]; 2],
+            accumulator: [[0.; ACCUMULATOR_OUT]; 2],
             layer,
         }
     }
 
-    pub fn from_perspective(&self, colour: Colour) -> [f32; LAYER_1_OUT * 2] {
-        let mut tensor = [0.; LAYER_1_OUT * 2];
-        tensor[..LAYER_1_OUT].copy_from_slice(&self.accumulator[colour as usize]);
-        tensor[LAYER_1_OUT..].copy_from_slice(&self.accumulator[colour.inverse() as usize]);
+    pub fn from_perspective(&self, colour: Colour) -> [f32; ACCUMULATOR_OUT * 2] {
+        let mut tensor = [0.; ACCUMULATOR_OUT * 2];
+        tensor[..ACCUMULATOR_OUT].copy_from_slice(&self.accumulator[colour as usize]);
+        tensor[ACCUMULATOR_OUT..].copy_from_slice(&self.accumulator[colour.inverse() as usize]);
         tensor
     }
 
@@ -47,9 +47,9 @@ impl<'a> NnueAccumulator<'a> {
         self.accumulator[perspective as usize].copy_from_slice(&self.layer.bias);
 
         for &feature in active_features {
-            for i in 0..LAYER_1_OUT {
+            for i in 0..ACCUMULATOR_OUT {
                 self.accumulator[perspective as usize][i] +=
-                    self.layer.weights[feature as usize * LAYER_1_OUT + i];
+                    self.layer.weights[feature as usize * ACCUMULATOR_OUT + i];
             }
         }
     }
@@ -62,15 +62,15 @@ impl<'a> NnueAccumulator<'a> {
         perspective: Colour,
     ) {
         for &feature in added_features {
-            for i in 0..LAYER_1_OUT {
+            for i in 0..ACCUMULATOR_OUT {
                 self.accumulator[perspective as usize][i] +=
-                    self.layer.weights[feature as usize * LAYER_1_OUT + i]
+                    self.layer.weights[feature as usize * ACCUMULATOR_OUT + i]
             }
         }
         for &feature in removed_features {
-            for i in 0..LAYER_1_OUT {
+            for i in 0..ACCUMULATOR_OUT {
                 self.accumulator[perspective as usize][i] -=
-                    self.layer.weights[feature as usize * LAYER_1_OUT + i]
+                    self.layer.weights[feature as usize * ACCUMULATOR_OUT + i]
             }
         }
     }
@@ -78,23 +78,23 @@ impl<'a> NnueAccumulator<'a> {
 
 /// NNUE model.
 pub struct Nnue {
-    l0: LinearLayer<FEATURES_COUNT, LAYER_1_OUT>,
-    l1: LinearLayer<{ LAYER_1_OUT * 2 }, LAYER_2_OUT>,
-    l2: LinearLayer<LAYER_2_OUT, OUTPUT_SIZE>,
+    accumulator: LinearLayer<FEATURES_COUNT, ACCUMULATOR_OUT>,
+    hidden: LinearLayer<{ ACCUMULATOR_OUT * 2 }, HIDDEN_OUT>,
+    output: LinearLayer<HIDDEN_OUT, OUTPUT_OUT>,
 }
 impl Nnue {
     /// Initializes a blank network with all weights to 0.
     pub fn blank() -> Self {
         Self {
-            l0: LinearLayer::blank(),
-            l1: LinearLayer::blank(),
-            l2: LinearLayer::blank(),
+            accumulator: LinearLayer::blank(),
+            hidden: LinearLayer::blank(),
+            output: LinearLayer::blank(),
         }
     }
 
     /// Returns an [`NnueAccumulator`] referencing this network's first layer.
     pub fn get_accumulator(&self) -> NnueAccumulator {
-        NnueAccumulator::with_layer(&self.l0)
+        NnueAccumulator::with_layer(&self.accumulator)
     }
 
     pub fn forward(&self, accumulator: &NnueAccumulator, perspective: Colour) -> f32 {
@@ -106,9 +106,9 @@ impl Nnue {
 
         let mut input = accumulator.from_perspective(perspective);
         clipped_relu(&mut input);
-        let mut input = self.l1.forward(input);
+        let mut input = self.hidden.forward(input);
         clipped_relu(&mut input);
-        let output = self.l2.forward(input);
+        let output = self.output.forward(input);
 
         output[0]
     }
