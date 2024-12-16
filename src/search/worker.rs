@@ -91,12 +91,22 @@ impl<O: Write> MctsWorker<O> {
     pub fn search(mut self, mut position: Position) {
         self.perspective = position.side_to_move();
         let mut info_tick = Instant::now();
+        if position.fifty_move_draw() || position.threefold_repetition() {
+            return;
+        } else {
+            let (actions, _) = position.actions();
+            if actions.is_empty() {
+                return;
+            }
+        }
         while self.within_budget() {
+            let last_nodes = self.current_nodes.load(Ordering::Relaxed);
             self.depth = 0;
             let (selected, expandable) = self.select(self.root.clone(), &mut position);
             let reward = if expandable {
                 let expanded = self.expand(selected.clone(), &mut position);
-                let reward = self.playout(&mut position);
+                let reward = self._playout(&mut position);
+
                 expanded.update_value(reward);
                 reward
             } else {
@@ -114,7 +124,6 @@ impl<O: Write> MctsWorker<O> {
                 }
             };
             Self::backup(selected, reward, &mut position);
-            // let _reward = nnue::forward(&self.accumulator, position.side_to_move());
 
             if self.depth > self.reached_depth {
                 self.reached_depth = self.depth
@@ -126,6 +135,9 @@ impl<O: Write> MctsWorker<O> {
                     self.send_info().unwrap();
                 }
                 self.send_current_line().unwrap();
+            }
+            if last_nodes == self.current_nodes.load(Ordering::Relaxed) {
+                break;
             }
         }
 
@@ -177,9 +189,19 @@ impl<O: Write> MctsWorker<O> {
         }
     }
 
-    fn playout(&self, position: &mut Position) -> Value {
+    fn _playout(&self, position: &mut Position) -> Value {
         let original = position.clone();
+        let mut depth = 0;
         let value = loop {
+            if depth >= 100 {
+                // let reward = 1. / nnue::forward(&self.accumulator, position.side_to_move());
+                // break Value::WinProbability {
+                //     wins: reward as i32,
+                //     samples: 1,
+                //     perspective: position.side_to_move(),
+                // };
+                break Value::Draw;
+            }
             if position.fifty_move_draw() || position.threefold_repetition() {
                 break Value::Draw;
             }
@@ -187,6 +209,7 @@ impl<O: Write> MctsWorker<O> {
             let (actions, check) = position.actions();
             if let Some(action) = actions.choose(&mut thread_rng()) {
                 position.make_legal(*action);
+                depth += 1;
             } else {
                 break if check {
                     Value::Win(position.side_to_move().inverse())
@@ -215,16 +238,6 @@ impl<O: Write> MctsWorker<O> {
             UciInformation::SearchDepth(self.reached_depth),
             UciInformation::SearchTime(self.start_time.elapsed()),
             UciInformation::SearchedNodes(self.current_nodes.load(Ordering::Relaxed)),
-            UciInformation::CurrentlySearchedMove {
-                move_index: None,
-                mv: self
-                    .root
-                    .most_promising_child()
-                    .unwrap()
-                    .action()
-                    .unwrap()
-                    .downgrade(),
-            },
             UciInformation::CentipawnScore {
                 centipawns: win_probability_to_centipawns(
                     self.root.value().exploitation_score(self.perspective),
@@ -236,18 +249,24 @@ impl<O: Write> MctsWorker<O> {
                     / self.start_time.elapsed().as_secs_f32()) as u64,
             ),
         ];
-        let pv: Vec<_> = self
-            .root
-            .principal_variation()
-            .into_iter()
-            .map(LegalAction::downgrade)
-            .collect();
-        if !pv.is_empty() {
-            informations.push(UciInformation::PrincipalVariation {
-                ranking: None,
-                moves: pv,
+        if let Some(child) = self.root.most_promising_child() {
+            informations.push(UciInformation::CurrentlySearchedMove {
+                move_index: None,
+                mv: child.action().unwrap().downgrade(),
             })
         }
+        // let pv: Vec<_> = self
+        //     .root
+        //     .principal_variation()
+        //     .into_iter()
+        //     .map(LegalAction::downgrade)
+        //     .collect();
+        // if !pv.is_empty() {
+        //     informations.push(UciInformation::PrincipalVariation {
+        //         ranking: None,
+        //         moves: pv,
+        //     })
+        // }
 
         self.writer
             .lock()

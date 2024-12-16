@@ -1,6 +1,10 @@
+use std::path::PathBuf;
+
 #[cfg(feature = "perft")]
 use chameleon_chess::game::perft::PerftConfig;
-use chameleon_chess::{game::position::Position, uci::uci_client};
+use chameleon_chess::{
+    brain::training::selfplay, game::position::Position, search::SearchConfig, uci::uci_client,
+};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
@@ -38,10 +42,13 @@ enum Command {
         #[arg(long)]
         no_board: bool,
     },
+    /// Generates a batch of selfplay games
+    SelfPlay { games: usize, output: PathBuf },
 }
 
 pub fn main() {
     let args = Arguments::parse();
+    env_logger::init();
 
     match args.command.unwrap_or(Command::Uci) {
         Command::Uci => uci_client().unwrap(),
@@ -56,7 +63,7 @@ pub fn main() {
             no_board,
         } => {
             let mut position = if let Some(fen) = position {
-                Position::from_fen(&fen).unwrap()
+                Position::from_fen(&fen.parse().unwrap())
             } else {
                 Position::initial()
             };
@@ -74,6 +81,18 @@ pub fn main() {
         #[cfg(not(feature = "perft"))]
         Command::Perft { .. } => {
             eprintln!("Chameleon has not been compiled with feature `perft`");
+        }
+        #[cfg(feature = "train")]
+        Command::SelfPlay { games, output } => {
+            let records = selfplay::self_play(
+                games,
+                SearchConfig::new().with_max_nodes(10000).with_workers(1),
+            );
+            selfplay::save_self_play(output, &records).unwrap();
+        }
+        #[cfg(not(feature = "train"))]
+        Command::SelfPlay { .. } => {
+            eprintln!("Chameleon has not been compiled with feature `train`");
         }
     }
 }

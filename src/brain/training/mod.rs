@@ -2,9 +2,9 @@
 
 use burn::{config::Config, optim::AdamConfig, tensor::backend::AutodiffBackend};
 
-mod batcher;
-mod model;
-mod selfplay;
+pub mod batcher;
+pub mod model;
+pub mod selfplay;
 
 #[derive(Config)]
 pub struct TrainingConfig {

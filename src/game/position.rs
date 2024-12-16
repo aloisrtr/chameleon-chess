@@ -10,7 +10,7 @@ use super::{
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::Colour,
-    fen::{Fen, FenError},
+    fen::Fen,
     history::HistoryEntry,
     magic_tables::*,
     piece::PieceKind,
@@ -78,16 +78,18 @@ impl Position {
 
     /// The initial position of chess.
     pub fn initial() -> Self {
-        Self::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap()
+        Self::from_fen(
+            &"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+                .parse()
+                .unwrap(),
+        )
     }
 
     /// Creates a position from a FEN string.
     /// # Errors
     /// This function returns an error if the FEN string passed is invalid or badly
     /// formatted.
-    pub fn from_fen(fen: &str) -> Result<Self, FenError> {
-        let fen: Fen = fen.parse()?;
-
+    pub fn from_fen(fen: &Fen) -> Self {
         let mut color_bitboards = [Bitboard::empty(); 2];
         color_bitboards.copy_from_slice(&fen.bitboards[0..2]);
         let mut piece_bitboards = [Bitboard::empty(); 6];
@@ -116,13 +118,13 @@ impl Position {
         };
         pos.rehash();
 
-        Ok(pos)
+        pos
     }
 
     /// Returns a FEN string describing the position.
-    pub fn fen(&self) -> String {
+    pub fn fen(&self) -> Fen {
         let mut bitboards = [Bitboard::empty(); 8];
-        bitboards.copy_from_slice(self.color_bitboards.as_slice());
+        bitboards[0..2].copy_from_slice(self.color_bitboards.as_slice());
         bitboards[2..].copy_from_slice(self.piece_bitboards.as_slice());
         Fen {
             bitboards,
@@ -141,7 +143,6 @@ impl Position {
             halfmove_clock: self.reversible_moves as u16,
             fullmove_counter: (self.history.len() / 2) as u16,
         }
-        .to_string()
     }
 
     /// Adds a piece on the board on the given square.
