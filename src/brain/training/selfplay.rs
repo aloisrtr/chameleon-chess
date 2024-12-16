@@ -42,7 +42,7 @@ pub fn self_play(games: usize, search_config: SearchConfig) -> Vec<FeaturesRecor
         };
 
         for (fen, white_active_features, black_active_features) in game_record {
-            records.push(FeaturesRecord { fen, white_active_features, black_active_features, value:  })
+            // records.push(FeaturesRecord { fen, white_active_features, black_active_features, value:  })
         }
     }
 

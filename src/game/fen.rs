@@ -30,9 +30,9 @@ pub enum FenError {
     TooManySquares,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Fen {
-    bitboards: [Bitboard; NUM_COLOURS + NUM_PIECES],
+    pub(crate) bitboards: [Bitboard; NUM_COLOURS + NUM_PIECES],
     pub side_to_move: Colour,
     pub castling_rights: CastlingRights,
     pub en_passant: Option<Square>,
@@ -110,19 +110,21 @@ impl Fen {
     pub fn decompress<R: BitRead>(stream: &mut R) -> std::io::Result<Self> {
         let mut bitboards = [Bitboard::empty(); 8];
 
-        let rocc: Bitboard = stream.read::<u64>(64)?.into();
+        let mut rocc: Bitboard = stream.read::<u64>(64)?.into();
         let bb_white: Bitboard =
             Bitboard::from(stream.read::<u64>(rocc.cardinality() as u32)?).pdep(rocc);
         bitboards[Colour::White as usize] = bb_white;
         bitboards[Colour::Black as usize] = bb_white ^ rocc;
 
-        for kind in PieceKind::iter() {
+        for kind in PieceKind::iter_all_but_king() {
             let piece_bb =
                 Bitboard::from(stream.read::<u64>(rocc.cardinality() as u32)?).pdep(rocc);
             rocc ^= piece_bb;
             bitboards[kind as usize + 2] = piece_bb;
         }
-        debug_assert!(rocc.is_empty());
+        bitboards[PieceKind::King as usize + 2] = rocc;
+        rocc ^= bitboards[PieceKind::King as usize + 2];
+        debug_assert_eq!(Bitboard::empty(), rocc);
 
         let side_to_move = stream.read_bit()?.into();
 
@@ -136,7 +138,7 @@ impl Fen {
                 & Rank::Six.bitboard())
                 >> 8;
             let candis = white_candis | black_candis;
-            let ep_square =
+            let mut ep_square =
                 Bitboard::from(stream.read::<u64>(candis.cardinality() as u32)?).pdep(candis);
             ep_square.pop_lowest_set_square()
         } else {
@@ -159,7 +161,7 @@ impl Fen {
             castling_rights.allow_queenside_castle(Colour::Black)
         }
 
-        let halfmove_clock = stream.read(7)?.into();
+        let halfmove_clock = stream.read(7)?;
 
         Ok(Fen {
             bitboards,
@@ -272,6 +274,11 @@ impl std::str::FromStr for Fen {
 }
 impl std::fmt::Display for Fen {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::fmt::Debug for Fen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Pieces
         let mut skip = 0;
         let mut line_length = 0;
@@ -343,10 +350,11 @@ mod test {
         let fen: Fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
             .parse()
             .unwrap();
-        let mut buffer = [0u8; 64];
-        let mut writer = BitWriter::endian(Cursor::new(&mut buffer), BigEndian);
+        let buffer = [0u8; 64];
+        let mut writer = BitWriter::endian(Cursor::new(buffer), BigEndian);
         fen.compress(&mut writer).unwrap();
 
+        let buffer = writer.into_writer().into_inner();
         let mut reader = BitReader::endian(Cursor::new(&buffer), BigEndian);
         let result = Fen::decompress(&mut reader).unwrap();
 

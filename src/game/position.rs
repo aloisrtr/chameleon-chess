@@ -87,17 +87,45 @@ impl Position {
     /// formatted.
     pub fn from_fen(fen: &str) -> Result<Self, FenError> {
         let fen: Fen = fen.parse()?;
-        todo!()
+
+        let mut color_bitboards = [Bitboard::empty(); 2];
+        color_bitboards.copy_from_slice(&fen.bitboards[0..2]);
+        let mut piece_bitboards = [Bitboard::empty(); 6];
+        piece_bitboards.copy_from_slice(&fen.bitboards[2..]);
+        let mut pieces = [None; 64];
+        for sq in Square::squares_fen_iter() {
+            pieces[sq as usize] = fen.piece_on(sq).map(|(k, _)| k);
+        }
+
+        let mut pos = Self {
+            pieces,
+            color_bitboards,
+            piece_bitboards,
+            occupancy_bitboard: color_bitboards[0] | color_bitboards[1],
+
+            side_to_move: fen.side_to_move,
+            castling_rights: fen.castling_rights,
+            reversible_moves: fen.halfmove_clock as u8,
+            en_passant_file: fen.en_passant.map(|ep| ep.file()),
+            history: Vec::new(),
+            hash: 0,
+
+            added_features: vec![],
+            removed_features: vec![],
+            should_refresh: true,
+        };
+        pos.rehash();
+
+        Ok(pos)
     }
 
     /// Returns a FEN string describing the position.
     pub fn fen(&self) -> String {
-        let mut pieces = [None; 64];
-        for (i, dest) in pieces.iter_mut().enumerate() {
-            *dest = self.piece_on(unsafe { Square::from_index_unchecked(i as u8) })
-        }
+        let mut bitboards = [Bitboard::empty(); 8];
+        bitboards.copy_from_slice(self.color_bitboards.as_slice());
+        bitboards[2..].copy_from_slice(self.piece_bitboards.as_slice());
         Fen {
-            pieces,
+            bitboards,
             side_to_move: self.side_to_move,
             castling_rights: self.castling_rights,
             en_passant: self.en_passant_file.map(|file| {
@@ -1075,6 +1103,30 @@ impl Position {
     #[inline(always)]
     pub fn zobrist_hash(&self) -> u64 {
         self.hash
+    }
+
+    /// Hashes the position from 0.
+    #[inline]
+    pub fn rehash(&mut self) {
+        self.hash = 0;
+        for sq in Square::squares_iter() {
+            if let Some((kind, colour)) = self.piece_on(sq) {
+                self.hash ^= if colour.is_black() {
+                    zobrist::piece_hash::<true>(kind, sq)
+                } else {
+                    zobrist::piece_hash::<false>(kind, sq)
+                };
+            }
+        }
+
+        self.hash ^= self.castling_rights.zobrist_hash();
+        if self.side_to_move.is_black() {
+            self.hash ^= zobrist::side_to_move_hash();
+        }
+
+        if let Some(ep) = self.en_passant_file {
+            self.hash ^= zobrist::en_passant_file_hash(ep)
+        }
     }
 }
 impl std::hash::Hash for Position {

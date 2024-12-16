@@ -474,11 +474,11 @@ impl std::ops::Add<Delta> for Bitboard {
 
     #[inline]
     fn add(self, rhs: Delta) -> Self::Output {
-        Self(if 0 < rhs as i8 {
+        if 0 < rhs as i8 {
             self << (rhs as u8)
         } else {
             self >> (-(rhs as i8) as u8)
-        })
+        }
     }
 }
 impl std::ops::AddAssign<Delta> for Bitboard {
@@ -498,11 +498,11 @@ impl std::ops::Sub<Delta> for Bitboard {
 
     #[inline]
     fn sub(self, rhs: Delta) -> Self::Output {
-        Self(if 0 < rhs as i8 {
+        if 0 < rhs as i8 {
             self >> (rhs as u8)
         } else {
             self << (-(rhs as i8) as u8)
-        })
+        }
     }
 }
 impl std::ops::SubAssign<Delta> for Bitboard {
