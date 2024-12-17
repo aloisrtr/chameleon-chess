@@ -13,7 +13,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     brain::nnue::{self, NnueAccumulator},
-    game::{action::LegalAction, colour::Colour, position::Position, score::*},
+    game::{action::Action, colour::Colour, position::Position, score::*},
     uci::{
         commands::{UciInformation, UciMessage},
         endpoint::UciWriter,
@@ -103,14 +103,7 @@ impl<O: Write> MctsWorker<O> {
                 if position.fifty_move_draw() || position.threefold_repetition() {
                     Value::Draw
                 } else {
-                    let (actions, check) = position.actions();
-                    if actions.is_empty() && check {
-                        Value::Win(position.side_to_move().inverse())
-                    } else if actions.is_empty() {
-                        Value::Draw
-                    } else {
-                        selected.value()
-                    }
+                    todo!()
                 }
             };
             Self::backup(selected, reward, &mut position);
@@ -136,7 +129,7 @@ impl<O: Write> MctsWorker<O> {
                     .lock()
                     .unwrap()
                     .send_message(UciMessage::SearchResult {
-                        best: m.downgrade(),
+                        best: m,
                         ponder_on: None,
                     })
                     .unwrap()
@@ -161,7 +154,9 @@ impl<O: Write> MctsWorker<O> {
             };
             node = child.clone();
             node.add_virtual_loss();
-            position.make_legal(node.action().unwrap());
+            unsafe {
+                position.make_unchecked(node.action().unwrap());
+            }
         }
         (node, true)
     }
@@ -170,7 +165,9 @@ impl<O: Write> MctsWorker<O> {
         Node::init_children(node.clone(), position);
         if let Some(node) = node.add_child() {
             self.current_nodes.fetch_add(1, Ordering::Relaxed);
-            position.make_legal(node.action().unwrap());
+            unsafe {
+                position.make_unchecked(node.action().unwrap());
+            }
             node
         } else {
             node
@@ -184,15 +181,13 @@ impl<O: Write> MctsWorker<O> {
                 break Value::Draw;
             }
 
-            let (actions, check) = position.actions();
+            let actions = position.actions();
             if let Some(action) = actions.choose(&mut thread_rng()) {
-                position.make_legal(*action);
+                unsafe {
+                    position.make_unchecked(*action);
+                }
             } else {
-                break if check {
-                    Value::Win(position.side_to_move().inverse())
-                } else {
-                    Value::Draw
-                };
+                todo!()
             }
         };
 
@@ -217,13 +212,7 @@ impl<O: Write> MctsWorker<O> {
             UciInformation::SearchedNodes(self.current_nodes.load(Ordering::Relaxed)),
             UciInformation::CurrentlySearchedMove {
                 move_index: None,
-                mv: self
-                    .root
-                    .most_promising_child()
-                    .unwrap()
-                    .action()
-                    .unwrap()
-                    .downgrade(),
+                mv: self.root.most_promising_child().unwrap().action().unwrap(),
             },
             UciInformation::CentipawnScore {
                 centipawns: win_probability_to_centipawns(
@@ -236,12 +225,7 @@ impl<O: Write> MctsWorker<O> {
                     / self.start_time.elapsed().as_secs_f32()) as u64,
             ),
         ];
-        let pv: Vec<_> = self
-            .root
-            .principal_variation()
-            .into_iter()
-            .map(LegalAction::downgrade)
-            .collect();
+        let pv: Vec<_> = self.root.principal_variation();
         if !pv.is_empty() {
             informations.push(UciInformation::PrincipalVariation {
                 ranking: None,

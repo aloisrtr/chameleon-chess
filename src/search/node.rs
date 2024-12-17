@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use crate::game::{action::LegalAction, colour::Colour, position::Position};
+use crate::game::{action::Action, colour::Colour, position::Position};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
@@ -48,7 +48,7 @@ impl Value {
 /// MCTS node that is accessible through threads lock-free.
 pub struct Node {
     perspective: Colour,
-    action: Option<LegalAction>,
+    action: Option<Action>,
     score_visits: AtomicU64,
     children: UnsafeCell<Vec<Arc<Node>>>,
     parent: Option<Weak<Node>>,
@@ -77,7 +77,7 @@ impl Node {
     }
 
     /// Creates a new node with the given parent and leading action.
-    pub fn new(perspective: Colour, action: LegalAction, parent: Weak<Self>) -> Arc<Self> {
+    pub fn new(perspective: Colour, action: Action, parent: Weak<Self>) -> Arc<Self> {
         Arc::new(Self {
             perspective,
             action: Some(action),
@@ -93,7 +93,7 @@ impl Node {
     }
 
     /// Returns the action that led to this node.
-    pub fn action(&self) -> Option<LegalAction> {
+    pub fn action(&self) -> Option<Action> {
         self.action
     }
 
@@ -106,7 +106,7 @@ impl Node {
     pub fn init_children(node: Arc<Self>, position: &Position) {
         if !node.is_parent.swap(true, Ordering::SeqCst) {
             let mut actions_count = -1;
-            for action in position.actions().0 {
+            for action in position.actions() {
                 unsafe {
                     node.children.get().as_mut().unwrap().push(Self::new(
                         node.perspective.inverse(),
@@ -243,12 +243,12 @@ impl Node {
     }
 
     /// Returns the best move from this node.
-    pub fn best_move(&self) -> Option<LegalAction> {
+    pub fn best_move(&self) -> Option<Action> {
         self.best_child().and_then(|c| c.action())
     }
 
     /// Returns the principal variation starting from this node.
-    pub fn principal_variation(&self) -> Vec<LegalAction> {
+    pub fn principal_variation(&self) -> Vec<Action> {
         let mut pv = vec![];
         let Some(mut node) = self.best_child() else {
             return pv;
@@ -265,7 +265,7 @@ impl Node {
         pv
     }
 
-    pub fn policy(&self) -> Vec<(LegalAction, Value)> {
+    pub fn policy(&self) -> Vec<(Action, Value)> {
         let children = unsafe { self.children.get().as_ref().unwrap() };
         children
             .iter()

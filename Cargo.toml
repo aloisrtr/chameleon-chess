@@ -30,9 +30,9 @@ opt-level = 2
 incremental = true
 
 [features]
-default = ["perft", "train", "serde"]
+default = ["perft", "serde"]
 perft = []
-serde = ["dep:serde"]
-train = ["dep:burn", "dep:bitstream-io"]
+serde = ["dep:serde", "dep:bitstream-io"]
+train = ["dep:burn"]
 
 

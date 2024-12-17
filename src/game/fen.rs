@@ -9,6 +9,7 @@ use super::{
     piece::{PieceKind, NUM_PIECES},
     square::Square,
 };
+#[cfg(feature = "serde")]
 use bitstream_io::{BitRead, BitWrite};
 use thiserror::Error;
 
@@ -63,6 +64,7 @@ impl Fen {
     }
 
     /// Compresses a FEN string for efficient storage.
+    #[cfg(feature = "serde")]
     pub fn compress<W: BitWrite>(&self, stream: &mut W) -> std::io::Result<()> {
         let mut rocc =
             self.bitboards[Colour::White as usize] | self.bitboards[Colour::Black as usize];
@@ -107,6 +109,7 @@ impl Fen {
     }
 
     /// Decompresses a FEN string from a packed storage.
+    #[cfg(feature = "serde")]
     pub fn decompress<R: BitRead>(stream: &mut R) -> std::io::Result<Self> {
         let mut bitboards = [Bitboard::empty(); 8];
 
@@ -341,11 +344,13 @@ impl std::fmt::Debug for Fen {
 mod test {
     use std::io::Cursor;
 
+    #[cfg(feature = "serde")]
     use bitstream_io::{BigEndian, BitReader, BitWriter};
 
     use super::*;
 
     #[test]
+    #[cfg(feature = "serde")]
     fn compress_decompress_ok() {
         let fen: Fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
             .parse()

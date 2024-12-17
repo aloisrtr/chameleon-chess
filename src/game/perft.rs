@@ -78,10 +78,10 @@ impl PerftConfig {
             let start = Instant::now();
             let nodes: u64 = position
                 .actions()
-                .0
                 .iter()
                 .map(|&mv| {
-                    position.make_legal(mv);
+                    // SAFETY: just generated
+                    unsafe { position.make_unchecked(mv) };
                     let mv_nodes = perft_rec(position, depth - 1, self.bulk_counting);
                     position.unmake();
                     if self.divide {
@@ -113,14 +113,14 @@ fn perft_rec(position: &mut Position, depth_left: u8, bulk_counting: bool) -> u6
     if depth_left == 0 {
         1
     } else if depth_left == 1 && bulk_counting {
-        position.actions().0.len() as u64
+        position.actions().len() as u64
     } else {
         position
             .actions()
-            .0
             .iter()
             .map(|&mv| {
-                position.make_legal(mv);
+                // SAFETY: just generated
+                unsafe { position.make_unchecked(mv) };
                 let mv_nodes = perft_rec(position, depth_left - 1, bulk_counting);
                 position.unmake();
                 mv_nodes

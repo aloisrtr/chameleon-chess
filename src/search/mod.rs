@@ -15,10 +15,7 @@ use node::{Node, Value};
 use worker::MctsWorker;
 
 use crate::{
-    game::{
-        action::{Action, LegalAction},
-        position::Position,
-    },
+    game::{action::Action, position::Position},
     uci::{endpoint::UciWriter, search::UciSearchParameters},
 };
 
@@ -253,7 +250,7 @@ impl SearchHandle {
     }
 
     /// Returns the search's current best action.
-    pub fn best_action(&self) -> Option<LegalAction> {
+    pub fn best_action(&self) -> Option<Action> {
         self.root.best_move()
     }
 
@@ -261,7 +258,7 @@ impl SearchHandle {
     /// sequence of moves.
     ///
     /// When running a forced checkmate search, this only returns [`Some`] when a mate is found.
-    pub fn principal_variation(&self) -> Option<Vec<LegalAction>> {
+    pub fn principal_variation(&self) -> Option<Vec<Action>> {
         Some(self.root.principal_variation())
     }
 
