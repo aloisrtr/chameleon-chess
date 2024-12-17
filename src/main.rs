@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-#[cfg(feature = "train")]
-use chameleon_chess::brain::training::selfplay;
 #[cfg(feature = "perft")]
 use chameleon_chess::game::perft::PerftConfig;
-use chameleon_chess::{game::position::Position, search::SearchConfig, uci::uci_client};
+#[cfg(feature = "train")]
+use chameleon_chess::{brain::training::selfplay, search::SearchConfig};
+use chameleon_chess::{game::position::Position, uci::uci_client};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]

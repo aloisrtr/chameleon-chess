@@ -37,7 +37,7 @@ pub enum UciCommand<'a> {
     PonderHit,
     Quit,
 }
-impl<'a> std::fmt::Display for UciCommand<'a> {
+impl std::fmt::Display for UciCommand<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Initialize => writeln!(f, "uci"),
@@ -82,7 +82,7 @@ impl<'a> std::fmt::Display for UciCommand<'a> {
         }
     }
 }
-impl<'a> std::str::FromStr for UciCommand<'a> {
+impl std::str::FromStr for UciCommand<'_> {
     type Err = ();
 
     /// Parses a UCI command in string format.
@@ -307,7 +307,7 @@ pub enum UciMessage<'a> {
         field: UciOptionField,
     },
 }
-impl<'a> std::fmt::Display for UciMessage<'a> {
+impl std::fmt::Display for UciMessage<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Identity { name, author } => {

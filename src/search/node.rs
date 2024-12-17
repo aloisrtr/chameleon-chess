@@ -160,12 +160,10 @@ impl Node {
     pub fn value(&self) -> Value {
         let (wins, visits) = self.wins_and_visits();
         if visits == u32::MAX {
-            if wins == 0 {
-                Value::Draw
-            } else if wins > 0 {
-                Value::Win(self.perspective)
-            } else {
-                Value::Win(self.perspective.inverse())
+            match wins.cmp(&0) {
+                std::cmp::Ordering::Equal => Value::Draw,
+                std::cmp::Ordering::Greater => Value::Win(self.perspective),
+                _ => Value::Win(self.perspective.inverse()),
             }
         } else {
             Value::WinProbability {
@@ -254,18 +252,16 @@ impl Node {
             return pv;
         };
 
-        while node.is_fully_expanded() {
+        loop {
             pv.push(node.action().unwrap());
-            let Some(n) = node.best_child() else {
-                return pv;
-            };
+            let Some(n) = node.best_child() else { break };
             node = n
         }
 
         pv
     }
 
-    pub fn policy(&self) -> Vec<(Action, Value)> {
+    pub fn _policy(&self) -> Vec<(Action, Value)> {
         let children = unsafe { self.children.get().as_ref().unwrap() };
         children
             .iter()

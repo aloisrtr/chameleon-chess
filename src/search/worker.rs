@@ -38,7 +38,7 @@ pub struct MctsWorker<O: Write> {
     pub should_stop: Arc<AtomicBool>,
 
     // Policy
-    pub accumulator: NnueAccumulator<'static>,
+    pub _accumulator: NnueAccumulator<'static>,
 
     // Output to UCI
     pub writer: Arc<Mutex<UciWriter<O>>>,
@@ -65,7 +65,7 @@ impl<O: Write> MctsWorker<O> {
             max_duration: Duration::MAX,
             start_time: Instant::now(),
             max_nodes: u64::MAX,
-            accumulator: nnue::get_accumulator(),
+            _accumulator: nnue::get_accumulator(),
         }
     }
 
@@ -91,16 +91,8 @@ impl<O: Write> MctsWorker<O> {
     pub fn search(mut self, mut position: Position) {
         self.perspective = position.side_to_move();
         let mut info_tick = Instant::now();
-        if position.fifty_move_draw() || position.threefold_repetition() {
-            return;
-        } else {
-            let actions = position.actions();
-            if actions.is_empty() {
-                return;
-            }
-        }
+
         while self.within_budget() {
-            let last_nodes = self.current_nodes.load(Ordering::Relaxed);
             self.depth = 0;
             let (selected, expandable) = self.select(self.root.clone(), &mut position);
             let reward = if expandable {
@@ -109,12 +101,16 @@ impl<O: Write> MctsWorker<O> {
 
                 expanded.update_value(reward);
                 reward
-            } else {
-                if position.fifty_move_draw() || position.threefold_repetition() {
-                    Value::Draw
+            } else if position.fifty_move_draw() || position.threefold_repetition() {
+                Value::Draw
+            } else if position.attack_information().in_check() {
+                if position.actions().is_empty() {
+                    Value::Win(position.side_to_move().inverse())
                 } else {
-                    todo!()
+                    Value::Draw
                 }
+            } else {
+                break;
             };
             Self::backup(selected, reward, &mut position);
 
@@ -128,9 +124,6 @@ impl<O: Write> MctsWorker<O> {
                     self.send_info().unwrap();
                 }
                 self.send_current_line().unwrap();
-            }
-            if last_nodes == self.current_nodes.load(Ordering::Relaxed) {
-                break;
             }
         }
 
@@ -190,16 +183,7 @@ impl<O: Write> MctsWorker<O> {
         let original = position.clone();
         let mut depth = 0;
         let value = loop {
-            if depth >= 100 {
-                // let reward = 1. / nnue::forward(&self.accumulator, position.side_to_move());
-                // break Value::WinProbability {
-                //     wins: reward as i32,
-                //     samples: 1,
-                //     perspective: position.side_to_move(),
-                // };
-                break Value::Draw;
-            }
-            if position.fifty_move_draw() || position.threefold_repetition() {
+            if depth > 255 || position.fifty_move_draw() || position.threefold_repetition() {
                 break Value::Draw;
             }
 
@@ -209,8 +193,10 @@ impl<O: Write> MctsWorker<O> {
                     position.make_unchecked(*action);
                 }
                 depth += 1;
+            } else if position.attack_information().in_check() {
+                break Value::Win(position.side_to_move().inverse());
             } else {
-                todo!()
+                break Value::Draw;
             }
         };
 
@@ -250,18 +236,13 @@ impl<O: Write> MctsWorker<O> {
                 mv: child.action().unwrap(),
             })
         }
-        // let pv: Vec<_> = self
-        //     .root
-        //     .principal_variation()
-        //     .into_iter()
-        //     .map(LegalAction::downgrade)
-        //     .collect();
-        // if !pv.is_empty() {
-        //     informations.push(UciInformation::PrincipalVariation {
-        //         ranking: None,
-        //         moves: pv,
-        //     })
-        // }
+        let pv: Vec<_> = self.root.principal_variation();
+        if !pv.is_empty() {
+            informations.push(UciInformation::PrincipalVariation {
+                ranking: None,
+                moves: pv,
+            })
+        }
 
         self.writer
             .lock()

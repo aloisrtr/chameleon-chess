@@ -607,7 +607,9 @@ impl Position {
                         // SAFETY: we already checked that there is a set square.
                         let pinned_square = unsafe { pin.lowest_set_square_unchecked() };
 
-                        let kind = self.pieces[pinned_square as usize].unwrap();
+                        let Some(kind) = self.pieces[pinned_square as usize] else {
+                            panic!("Detected pin on {pinned_square} with ray\n{ray:?}\nbut there is no piece here\n{self}");
+                        };
                         if kind.is_diagonal_slider() || kind == PieceKind::Pawn {
                             let movable_ray = (ray ^ pin) | origin.bitboard();
                             unsafe {
@@ -657,6 +659,7 @@ impl Position {
                 }
             }
         }
+
         AttackInformation {
             checkers,
             check_rays,
