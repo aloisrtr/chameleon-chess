@@ -97,7 +97,8 @@ impl Fen {
             u64::from(
                 self.en_passant
                     .map(|ep_square| ep_square.bitboard())
-                    .unwrap_or(Bitboard::empty()),
+                    .unwrap_or(Bitboard::empty())
+                    .pext(candis),
             ),
         )?;
 
@@ -322,7 +323,7 @@ impl std::fmt::Debug for Fen {
 
         write!(
             f,
-            "{} {} {} {} {}",
+            " {} {} {} {} {}",
             if self.side_to_move.is_black() {
                 'b'
             } else {

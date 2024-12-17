@@ -32,9 +32,19 @@ impl Action {
         Self(origin as u16 | (target as u16) << 6 | Self::SPECIAL_0)
     }
 
+    /// Returns a new promoting move.
+    pub const fn new_promotion(origin: Square, target: Square, promoting_to: PieceKind) -> Self {
+        Self(
+            origin as u16
+                | (target as u16) << 6
+                | Self::PROMOTION
+                | (promoting_to as u16 - PieceKind::Knight as u16) << 12,
+        )
+    }
+
     /// Creates a set of promotions from a pawn push.
     #[inline(always)]
-    pub const fn new_promotion(origin: Square, target: Square) -> [Self; 4] {
+    pub const fn new_promotions(origin: Square, target: Square) -> [Self; 4] {
         let general_move = origin as u16 | (target as u16) << 6 | Self::PROMOTION;
         [
             Self(general_move),
@@ -44,9 +54,24 @@ impl Action {
         ]
     }
 
+    /// Returns a new promoting move with capture.
+    pub const fn new_promotion_capture(
+        origin: Square,
+        target: Square,
+        promoting_to: PieceKind,
+    ) -> Self {
+        Self(
+            origin as u16
+                | (target as u16) << 6
+                | Self::PROMOTION
+                | Self::CAPTURE
+                | (promoting_to as u16 - PieceKind::Knight as u16) << 12,
+        )
+    }
+
     /// Creates a set of promotions from a pawn capture.
     #[inline(always)]
-    pub const fn new_promotion_capture(origin: Square, target: Square) -> [Self; 4] {
+    pub const fn new_promotion_captures(origin: Square, target: Square) -> [Self; 4] {
         let general_move = origin as u16 | (target as u16) << 6 | Self::PROMOTION | Self::CAPTURE;
         [
             Self(general_move),
@@ -142,16 +167,20 @@ impl std::str::FromStr for Action {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // let origin = s[0..2].parse()?;
-        // let target = s[2..4].parse()?;
-        // let promotion = s.chars().nth(4).and_then(|c| match c.to_ascii_lowercase() {
-        //     'n' => Some(PieceKind::Knight),
-        //     'b' => Some(PieceKind::Bishop),
-        //     'r' => Some(PieceKind::Rook),
-        //     'q' => Some(PieceKind::Queen),
-        //     _ => None,
-        // });
+        let origin = s[0..2].parse()?;
+        let target = s[2..4].parse()?;
+        let promotion = s.chars().nth(4).and_then(|c| match c.to_ascii_lowercase() {
+            'n' => Some(PieceKind::Knight),
+            'b' => Some(PieceKind::Bishop),
+            'r' => Some(PieceKind::Rook),
+            'q' => Some(PieceKind::Queen),
+            _ => None,
+        });
 
-        todo!()
+        Ok(if let Some(promoting_to) = promotion {
+            Self::new_promotion(origin, target, promoting_to)
+        } else {
+            Self::new_quiet(origin, target)
+        })
     }
 }

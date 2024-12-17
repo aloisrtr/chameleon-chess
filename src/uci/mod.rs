@@ -65,7 +65,7 @@ pub fn uci_client() -> std::io::Result<()> {
                     }
                     UciCommand::SetPosition { fen, moves } => {
                         position = if let Some(fen) = fen {
-                            Position::from_fen(&fen).unwrap()
+                            Position::from_fen(&fen.parse().unwrap())
                         } else {
                             Position::initial()
                         };

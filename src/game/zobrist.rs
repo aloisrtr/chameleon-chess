@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 use rand::{thread_rng, Rng};
 
 use super::{
+    colour::Colour,
     piece::PieceKind,
     square::{File, Square},
 };
@@ -22,14 +23,10 @@ pub static ZOBRIST_KEYS: LazyLock<[u64; 781]> = LazyLock::new(|| {
 // - one number for side to move
 // - four numbers for castling rights
 // - eight numbers for en passant file
-
-// We use overlapping keys to make it efficiently cachable.
-// Accesses are byte aligned, making it so that we only need 784 bytes instead of
-// 3124 bytes for aligned access.
 #[inline(always)]
-pub fn piece_hash<const BLACK_PIECE: bool>(kind: PieceKind, square: Square) -> u64 {
+pub fn piece_hash(kind: PieceKind, colour: Colour, square: Square) -> u64 {
     let piece_offset = kind as usize * square as usize;
-    if BLACK_PIECE {
+    if colour.is_black() {
         ZOBRIST_KEYS[piece_offset + 64 * 6]
     } else {
         ZOBRIST_KEYS[piece_offset]
