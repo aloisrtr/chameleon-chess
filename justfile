@@ -5,7 +5,7 @@ test:
     cargo test
 
 flamegraph:
-    CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph -- perft 7 -dbi --no-board
+    RUSTFLAGS="-C target-cpu=native" CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph -- perft 7 -dbi --no-board
 
 run:
     cargo run
