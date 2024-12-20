@@ -3,7 +3,11 @@
 
 use thiserror::Error;
 
-use crate::game::{action::Action, fen::Fen, score::CentiPawns};
+use crate::game::{
+    action::{Action, PcnMove},
+    fen::Fen,
+    score::CentiPawns,
+};
 use std::{borrow::Cow, time::Duration};
 
 use super::{
@@ -46,7 +50,7 @@ pub enum UciCommand<'a> {
     NewGame,
     SetPosition {
         fen: Option<Fen>,
-        moves: Vec<Action>,
+        moves: Vec<PcnMove>,
     },
     StartSearch(UciSearchParameters),
     StopSearch,
@@ -271,9 +275,8 @@ impl<'a> std::str::FromStr for UciCommand<'a> {
                         "searchmoves" => {
                             let mut moves = vec![];
                             while let Some(token) = tokens.next_if(|t| matches!(*t, "ponder" | "wtime" | "btime" | "winc" | "binc" | "movestogo" | "depth" | "nodes" | "mate" | "movetime" | "infinite" | "searchmoves")) {
-                                        let m = token.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(token.to_string()), expected: "move" })?;
-                                        moves.push(m);
-
+                                let m = token.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(token.to_string()), expected: "move" })?;
+                                moves.push(m);
                             }
                             params = params.with_available_moves(&moves)
                         }

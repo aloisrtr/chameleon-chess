@@ -70,18 +70,19 @@ pub fn uci_client() -> std::io::Result<()> {
                             Position::initial()
                         };
                         for m in moves {
-                            if position.make(m).is_err() {
+                            let Some(action) = position.get_action(m) else {
                                 send_debug_message(
                                     &writer,
                                     format!("Illegal move in position command: {m}"),
                                     debug,
                                 )?;
                                 break;
-                            }
+                            };
+                            position.make(action).unwrap()
                         }
                         send_debug_message(
                             &writer,
-                            format!("Set position to: {}", position.fen().to_string()),
+                            format!("Set position to: {}", position.fen()),
                             debug,
                         )?
                     }

@@ -15,7 +15,10 @@ use node::{Node, Value};
 use worker::MctsWorker;
 
 use crate::{
-    game::{action::Action, position::Position},
+    game::{
+        action::{Action, PcnMove},
+        position::Position,
+    },
     uci::{endpoint::UciWriter, search::UciSearchParameters},
 };
 
@@ -26,7 +29,7 @@ mod worker;
 pub struct SearchConfig {
     max_duration: (Duration, Duration),
     max_depth: u8,
-    actions: Vec<Action>,
+    actions: Vec<PcnMove>,
     max_nodes: u64,
     threads: u32,
     search_mate: bool,
@@ -124,7 +127,7 @@ impl SearchConfig {
     /// Sets a list of actions that the search should limit itself to.
     ///
     /// Any non-legal action present in the list will be ignored.
-    pub fn actions_to_search(mut self, actions: &[Action]) -> Self {
+    pub fn actions_to_search(mut self, actions: &[PcnMove]) -> Self {
         self.actions = Vec::from(actions);
         self
     }

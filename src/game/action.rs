@@ -1,8 +1,13 @@
 //! # Actions (or moves)
 
-use super::{colour::Colour, piece::PieceKind, square::Square};
+use super::{
+    colour::Colour,
+    piece::PieceKind,
+    square::{File, Rank, Square},
+};
 
-/// Describes a move using a from-to \<promotion\> approach.
+/// Describes a move using a from-to \<promotion\> approach, with all relevant
+/// information.
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
 pub struct Action(u16);
 impl Action {
@@ -123,6 +128,7 @@ impl Action {
     pub const fn is_capture(self) -> bool {
         self.0 & Self::CAPTURE != 0
     }
+
     /// Checks if this move is a promotion, and returns the promotion target if so.
     #[inline(always)]
     pub const fn promotion_target(self) -> Option<PieceKind> {
@@ -135,6 +141,22 @@ impl Action {
         } else {
             None
         }
+    }
+
+    /// Checks if this move encodes a queenside castle.
+    pub const fn is_queenside_castle(self) -> bool {
+        self.promotion_target().is_none()
+            && !self.is_capture()
+            && self.special_1_is_set()
+            && self.special_0_is_set()
+    }
+
+    /// Checks if this move encodes a kingside castle.
+    pub const fn is_kingside_castle(self) -> bool {
+        self.promotion_target().is_none()
+            && !self.is_capture()
+            && self.special_1_is_set()
+            && !self.special_0_is_set()
     }
 
     /// Checks if the SPECIAL_0 bit is set.
@@ -163,24 +185,108 @@ impl std::fmt::Display for Action {
         )
     }
 }
-impl std::str::FromStr for Action {
+
+/// Pure coordinate notation move, mainly used for parsing UCI.
+///
+/// These can be passed to a [`Position`] instance to convert them into usable moves.
+#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+pub struct PcnMove {
+    pub from: Square,
+    pub to: Square,
+    pub promoting_to: Option<PieceKind>,
+}
+impl std::fmt::Display for PcnMove {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.from, self.to)?;
+        if let Some(kind) = self.promoting_to {
+            write!(f, "{kind}")?
+        }
+        Ok(())
+    }
+}
+impl std::str::FromStr for PcnMove {
     type Err = ();
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let origin = s[0..2].parse()?;
-        let target = s[2..4].parse()?;
-        let promotion = s.chars().nth(4).and_then(|c| match c.to_ascii_lowercase() {
-            'n' => Some(PieceKind::Knight),
-            'b' => Some(PieceKind::Bishop),
-            'r' => Some(PieceKind::Rook),
-            'q' => Some(PieceKind::Queen),
-            _ => None,
-        });
-
-        Ok(if let Some(promoting_to) = promotion {
-            Self::new_promotion(origin, target, promoting_to)
+        let from = s[0..2].parse().unwrap();
+        let to = s[2..4].parse().unwrap();
+        let promoting_to = if s.len() == 5 {
+            match &s[4..5] {
+                "n" => Some(PieceKind::Knight),
+                "b" => Some(PieceKind::Bishop),
+                "r" => Some(PieceKind::Rook),
+                "q" => Some(PieceKind::Queen),
+                _ => None,
+            }
         } else {
-            Self::new_quiet(origin, target)
+            None
+        };
+
+        Ok(Self {
+            from,
+            to,
+            promoting_to,
         })
+    }
+}
+
+/// Standard Algebraic Notation encoded move, mainly for use in Portable Game Notation
+/// and/or for human-readability (in UCI debug mode for example).
+pub enum SanMove {
+    PawnMove {
+        origin_file: File,
+        is_capture: bool,
+        target: Square,
+        promoting_to: Option<PieceKind>,
+    },
+    PieceMove {
+        moving_piece: PieceKind,
+        origin_file: Option<File>,
+        origin_rank: Option<Rank>,
+        is_capture: bool,
+        target: Square,
+    },
+    KingSideCastle,
+    QueenSideCastle,
+}
+impl std::fmt::Display for SanMove {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::PawnMove {
+                origin_file,
+                is_capture,
+                target,
+                promoting_to,
+            } => {
+                if is_capture {
+                    write!(f, "{origin_file}x")?
+                }
+                write!(f, "{target}")?;
+                if let Some(kind) = promoting_to {
+                    write!(f, "{kind}")?
+                }
+                Ok(())
+            }
+            Self::PieceMove {
+                moving_piece,
+                origin_file,
+                origin_rank,
+                is_capture,
+                target,
+            } => {
+                write!(f, "{}", moving_piece.to_string().to_uppercase())?;
+                match (origin_file, origin_rank) {
+                    (None, None) => (),
+                    (Some(file), None) => write!(f, "{file}")?,
+                    (None, Some(rank)) => write!(f, "{rank}")?,
+                    (Some(file), Some(rank)) => write!(f, "{file}{rank}")?,
+                };
+                if is_capture {
+                    write!(f, "x")?
+                }
+                write!(f, "{target}")
+            }
+            Self::KingSideCastle => write!(f, "O-O"),
+            Self::QueenSideCastle => write!(f, "O-O-O"),
+        }
     }
 }
