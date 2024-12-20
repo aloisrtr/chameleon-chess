@@ -1,13 +1,30 @@
 //! # UCI Commands/Messages
 //! These are commands/messages that can be sent to another UCI compatible program.
 
-use crate::game::{action::Action, score::CentiPawns};
-use std::{borrow::Cow, collections::BTreeMap, time::Duration};
+use thiserror::Error;
+
+use crate::game::{action::Action, fen::Fen, score::CentiPawns};
+use std::{borrow::Cow, time::Duration};
 
 use super::{
     options::{UciOptionField, UciValue},
     search::UciSearchParameters,
 };
+
+#[derive(Debug, Clone, Error)]
+pub enum UciError<'a> {
+    #[error("Unknown command verb: {0}")]
+    UnknownCommandVerb(Cow<'a, str>),
+    #[error("Empty command")]
+    EmptyCommand,
+    #[error("Missing parameter: {0}")]
+    MissingParameter(&'static str),
+    #[error("Invalid parameter: expected {expected}, got {got}")]
+    InvalidParameter {
+        got: Cow<'a, str>,
+        expected: &'static str,
+    },
+}
 
 /// Commands that can be received by the client (engine) from the server.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -20,7 +37,7 @@ pub enum UciCommand<'a> {
         value: UciValue,
     },
     RegisterLater,
-    RegisterName(String),
+    RegisterName(Cow<'a, str>),
     RegisterCode(u64),
     Register {
         name: Cow<'a, str>,
@@ -28,7 +45,7 @@ pub enum UciCommand<'a> {
     },
     NewGame,
     SetPosition {
-        fen: Option<Cow<'a, str>>,
+        fen: Option<Fen>,
         moves: Vec<Action>,
     },
     StartSearch(UciSearchParameters),
@@ -44,16 +61,14 @@ impl std::fmt::Display for UciCommand<'_> {
             Self::Debug(on) => writeln!(f, "debug {}", if *on { "on" } else { "off" }),
             Self::IsReady => writeln!(f, "isready"),
             Self::SetOption { name, value } => {
-                writeln!(
-                    f,
-                    "setoption name {name}{}",
-                    match value {
-                        UciValue::Boolean(b) => format!(" value {b}"),
-                        UciValue::Integer(i) => format!(" value {i}"),
-                        UciValue::Str(s) => format!(" value {s}"),
-                        _ => String::new(),
-                    }
-                )
+                write!(f, "setoption name {name}")?;
+
+                match value {
+                    UciValue::Boolean(b) => writeln!(f, " value {b}"),
+                    UciValue::Integer(i) => writeln!(f, " value {i}"),
+                    UciValue::Str(s) => writeln!(f, " value {s}"),
+                    _ => writeln!(f),
+                }
             }
             Self::RegisterLater => writeln!(f, "register later"),
             Self::RegisterName(name) => writeln!(f, "register name {name}"),
@@ -63,222 +78,266 @@ impl std::fmt::Display for UciCommand<'_> {
                 writeln!(f, "regiter code {code}")
             }
             Self::NewGame => writeln!(f, "ucinewgame"),
-            Self::SetPosition { fen, moves } => writeln!(
-                f,
-                "fen {} moves{}",
-                if let Some(fen) = fen {
-                    fen.as_ref()
-                } else {
-                    "startpos"
-                },
-                moves
-                    .iter()
-                    .fold(String::new(), |acc, m| format!("{acc} {m}"))
-            ),
-            Self::StartSearch(builder) => writeln!(f, "go {}", builder.as_uci_string()),
+            Self::SetPosition { fen, moves } => {
+                write!(
+                    f,
+                    "fen {} moves",
+                    if let Some(fen) = fen {
+                        fen.to_string()
+                    } else {
+                        "startpos".to_string()
+                    },
+                )?;
+                for m in moves {
+                    write!(f, " {m}")?
+                }
+                writeln!(f)
+            }
+            Self::StartSearch(params) => writeln!(f, "go {}", params.as_uci_string()),
             Self::StopSearch => writeln!(f, "stop"),
             Self::PonderHit => writeln!(f, "ponderhit"),
             Self::Quit => writeln!(f, "quit"),
         }
     }
 }
-impl std::str::FromStr for UciCommand<'_> {
-    type Err = ();
+impl<'a> std::str::FromStr for UciCommand<'a> {
+    type Err = UciError<'a>;
 
     /// Parses a UCI command in string format.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();
-        let tokens = s.split_whitespace();
-        let mut verb = "";
-        let mut parameter_name = "";
-        let mut parameters = BTreeMap::new();
-        for token in tokens {
-            match token {
-                // Verbs, only the first one parsed is taken into account
-                "uci" if verb.is_empty() => return Ok(UciCommand::Initialize),
-                "debug" if verb.is_empty() => verb = "debug",
-                "isready" if verb.is_empty() => return Ok(UciCommand::IsReady),
-                "setoption" if verb.is_empty() => verb = "setoption",
-                "register" if verb.is_empty() => verb = "register",
-                "ucinewgame" if verb.is_empty() => return Ok(UciCommand::NewGame),
-                "position" if verb.is_empty() => verb = "position",
-                "go" if verb.is_empty() => verb = "go",
-                "stop" if verb.is_empty() => return Ok(UciCommand::StopSearch),
-                "ponderhit" if verb.is_empty() => return Ok(UciCommand::PonderHit),
-                "quit" if verb.is_empty() => return Ok(UciCommand::Quit),
-
-                // Parameters
-                "later" => {
-                    if verb == "register" {
-                        return Ok(UciCommand::RegisterLater);
-                    }
-                }
-                "startpos" => {
-                    parameters.insert("fen", vec![]);
-                }
-                "name" | "code" | "moves" | "searchmoves" | "wtime" | "btime" | "winc" | "binc"
-                | "movestogo" | "depth" | "nodes" | "mate" | "movetime" | "ponder" | "infinite"
-                | "value" => {
-                    parameters.insert(token, vec![]);
-                    parameter_name = token
-                }
-                "on" if !parameters.contains_key("off") => {
-                    parameters.insert("on", vec![]);
-                    parameter_name = "on"
-                }
-                "off" if !parameters.contains_key("on") => {
-                    parameters.insert("off", vec![]);
-                    parameter_name = "off"
-                }
-
-                // Values
-                t => {
-                    if parameter_name.is_empty() {
-                        parameters.insert("fen", vec![]);
-                        parameter_name = "fen";
-                    }
-
-                    if let Some(values) = parameters.get_mut(parameter_name) {
-                        values.push(t)
-                    }
-                }
-            }
-        }
-
-        // Actual parsing and building of the resulting command
-        Ok(match verb {
+        let mut tokens = s.split_whitespace().peekable();
+        match tokens.next().ok_or(UciError::EmptyCommand)? {
+            "uci" => Ok(UciCommand::Initialize),
             "debug" => {
-                if parameters.contains_key("on") {
-                    UciCommand::Debug(true)
-                } else if parameters.contains_key("off") {
-                    UciCommand::Debug(false)
-                } else {
-                    return Err(());
+                match tokens
+                    .next()
+                    .ok_or(UciError::MissingParameter("[on | off]"))?
+                {
+                    "on" => Ok(UciCommand::Debug(true)),
+                    "off" => Ok(UciCommand::Debug(false)),
+                    p => Err(UciError::InvalidParameter {
+                        got: Cow::Owned(p.to_string()),
+                        expected: "[on | off]",
+                    }),
                 }
             }
+            "isready" => Ok(UciCommand::IsReady),
             "setoption" => {
-                let name = Cow::Owned(parameters.get("name").map(|v| v.join(" ")).ok_or(())?);
-                let value = parameters
-                    .get("value")
-                    .and_then(|v| v.join(" ").parse().ok())
-                    .unwrap_or(UciValue::Button);
-                UciCommand::SetOption { name, value }
+                match tokens
+                    .next()
+                    .ok_or(UciError::MissingParameter("name <name>"))?
+                {
+                    "name" => {
+                        let mut name = String::new();
+                        let mut value = None;
+                        for token in tokens {
+                            match token {
+                                "value" => value = Some(String::new()),
+                                s => {
+                                    if let Some(value) = &mut value {
+                                        value.push(' ');
+                                        value.push_str(s);
+                                    } else {
+                                        name.push(' ');
+                                        name.push_str(s);
+                                    }
+                                }
+                            }
+                        }
+                        Ok(UciCommand::SetOption {
+                            name: Cow::Owned(name),
+                            value: if let Some(value) = value {
+                                UciValue::from_str(&value).unwrap()
+                            } else {
+                                UciValue::Button
+                            },
+                        })
+                    }
+                    p => Err(UciError::InvalidParameter {
+                        got: Cow::Owned(p.to_string()),
+                        expected: "name <name>",
+                    }),
+                }
             }
             "register" => {
-                let name = parameters.get("name").map(|n| n.join(" "));
-                let code = parameters
-                    .get("code")
-                    .and_then(|c| c.first())
-                    .and_then(|c| c.parse().ok());
-                if let Some(name) = name {
-                    if let Some(code) = code {
-                        UciCommand::Register {
-                            name: Cow::Owned(name),
-                            code,
+                let mut name = None;
+                let mut code = None;
+                let mut current_parse = None;
+                for token in tokens {
+                    match token {
+                        "later" => {
+                            return if current_parse.is_none() {
+                                Ok(UciCommand::RegisterLater)
+                            } else {
+                                Err(UciError::InvalidParameter {
+                                    got: Cow::Borrowed("later"),
+                                    expected: "cannot use later with name and/or code",
+                                })
+                            }
                         }
-                    } else {
-                        UciCommand::RegisterName(String::from_str(&name).unwrap())
+                        "name" => {
+                            name = Some(String::new());
+                            current_parse = Some(&mut name);
+                        }
+                        "code" => {
+                            code = Some(String::new());
+                            current_parse = Some(&mut code)
+                        }
+                        s => {
+                            if let Some(Some(current)) = current_parse {
+                                current.push(' ');
+                                current.push_str(s);
+                            } else {
+                                return Err(UciError::MissingParameter(
+                                    "[later | name <name> | code <code>]",
+                                ));
+                            }
+                        }
                     }
-                } else if let Some(code) = code {
-                    UciCommand::RegisterCode(code)
-                } else {
-                    UciCommand::RegisterLater
+                }
+                match (name, code) {
+                    (Some(name), Some(code)) => Ok(UciCommand::Register {
+                        name: Cow::Owned(name),
+                        code: code.parse().map_err(|_| UciError::InvalidParameter {
+                            got: Cow::Owned(code),
+                            expected: "integer",
+                        })?,
+                    }),
+                    (Some(name), _) => Ok(UciCommand::RegisterName(Cow::Owned(name))),
+                    (_, Some(code)) => {
+                        Ok(UciCommand::RegisterCode(code.parse().map_err(|_| {
+                            UciError::InvalidParameter {
+                                got: Cow::Owned(code),
+                                expected: "integer",
+                            }
+                        })?))
+                    }
+                    (_, _) => Err(UciError::MissingParameter(
+                        "[later | name <name> | code <code>]",
+                    )),
                 }
             }
+            "ucinewgame" => Ok(UciCommand::NewGame),
             "position" => {
-                let fen: Cow<'_, str> = Cow::Owned(parameters.get("fen").ok_or(())?.join(" "));
-                let moves = parameters.get("moves").cloned().unwrap_or(vec![]);
-                UciCommand::SetPosition {
-                    fen: if fen.is_empty() { None } else { Some(fen) },
-                    moves: moves.iter().filter_map(|m| m.parse().ok()).collect(),
+                let mut fen = String::new();
+                let mut moves = vec![];
+                match tokens
+                    .next()
+                    .ok_or(UciError::MissingParameter("[<fen> | startpos]"))?
+                {
+                    "startpos" => (),
+                    s => {
+                        fen.push_str(s);
+                        while let Some(token) = tokens.next_if(|token| *token != "moves") {
+                            fen.push(' ');
+                            fen.push_str(token);
+                        }
+                    }
+                }
+                match tokens
+                    .next()
+                    .ok_or(UciError::MissingParameter("moves <moves>"))?
+                {
+                    "moves" => {
+                        for token in tokens {
+                            moves.push(token.parse().map_err(|_| UciError::InvalidParameter {
+                                got: Cow::Owned(token.to_string()),
+                                expected: "move",
+                            })?);
+                        }
+                        Ok(UciCommand::SetPosition {
+                            fen: if fen.is_empty() {
+                                None
+                            } else {
+                                Some(Fen::parse(&fen).map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(fen),
+                                    expected: "FEN string",
+                                })?)
+                            },
+                            moves,
+                        })
+                    }
+                    p => Err(UciError::InvalidParameter {
+                        got: Cow::Owned(p.to_string()),
+                        expected: "moves <moves>",
+                    }),
                 }
             }
             "go" => {
-                let search_parameters = UciSearchParameters::default()
-                    .with_available_moves(
-                        &parameters
-                            .get("searchmoves")
-                            .unwrap_or(&Vec::new())
-                            .iter()
-                            .flat_map(|m| m.parse().ok())
-                            .collect::<Vec<_>>(),
-                    )
-                    .set_ponder(parameters.contains_key("ponder"))
-                    .with_white_time(
-                        parameters
-                            .get("wtime")
-                            .and_then(|v| {
-                                v.first()
-                                    .and_then(|d| d.parse().ok().map(Duration::from_millis))
-                            })
-                            .unwrap_or(Duration::ZERO),
-                    )
-                    .with_black_time(
-                        parameters
-                            .get("btime")
-                            .and_then(|v| {
-                                v.first()
-                                    .and_then(|d| d.parse().ok().map(Duration::from_millis))
-                            })
-                            .unwrap_or(Duration::ZERO),
-                    )
-                    .with_white_increment(
-                        parameters
-                            .get("winc")
-                            .and_then(|v| {
-                                v.first()
-                                    .and_then(|d| d.parse().ok().map(Duration::from_millis))
-                            })
-                            .unwrap_or(Duration::ZERO),
-                    )
-                    .with_black_increment(
-                        parameters
-                            .get("binc")
-                            .and_then(|v| {
-                                v.first()
-                                    .and_then(|d| d.parse().ok().map(Duration::from_millis))
-                            })
-                            .unwrap_or(Duration::ZERO),
-                    )
-                    .with_moves_until_time_control(
-                        parameters
-                            .get("movestogo")
-                            .and_then(|v| v.first().and_then(|m| m.parse().ok()))
-                            .unwrap_or(0),
-                    )
-                    .with_depth(
-                        parameters
-                            .get("depth")
-                            .and_then(|v| v.first().and_then(|d| d.parse().ok()))
-                            .unwrap_or(0),
-                    )
-                    .with_nodes(
-                        parameters
-                            .get("nodes")
-                            .and_then(|v| v.first().and_then(|n| n.parse().ok()))
-                            .unwrap_or(0),
-                    )
-                    .with_distance_to_mate(
-                        parameters
-                            .get("mate")
-                            .and_then(|v| v.first().and_then(|d| d.parse().ok()))
-                            .unwrap_or(0),
-                    )
-                    .with_search_time(
-                        parameters
-                            .get("movetime")
-                            .and_then(|v| {
-                                v.first()
-                                    .and_then(|d| d.parse().ok().map(Duration::from_millis))
-                            })
-                            .unwrap_or(Duration::ZERO),
-                    )
-                    .set_infinite(parameters.contains_key("infinite"));
+                let mut params = UciSearchParameters::new();
+                while let Some(token) = tokens.next() {
+                    match token {
+                        "searchmoves" => {
+                            let mut moves = vec![];
+                            while let Some(token) = tokens.next_if(|t| matches!(*t, "ponder" | "wtime" | "btime" | "winc" | "binc" | "movestogo" | "depth" | "nodes" | "mate" | "movetime" | "infinite" | "searchmoves")) {
+                                        let m = token.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(token.to_string()), expected: "move" })?;
+                                        moves.push(m);
 
-                UciCommand::StartSearch(search_parameters)
+                            }
+                            params = params.with_available_moves(&moves)
+                        }
+                        "ponder" => {
+                            params = params.set_ponder(true)
+                        }
+                        "wtime" => {
+                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            params = params.with_white_time(Duration::from_millis(time))
+                        }
+                        "btime" => {
+                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            params = params.with_black_time(Duration::from_millis(time))
+                        }
+                        "winc" => {
+                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            params = params.with_white_increment(Duration::from_millis(time))
+                        }
+                        "binc" => {
+                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            params = params.with_black_increment(Duration::from_millis(time))
+                        }
+                        "movestogo" => {
+                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            params = params.with_moves_until_time_control(value);
+                        }
+                        "depth" => {
+                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            params = params.with_depth(value);
+                        }
+                        "nodes" => {
+                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            params = params.with_nodes(value);
+                        }
+                        "mate" => {
+                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            params = params.with_distance_to_mate(value);
+                        }
+                        "movetime" => {
+                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            params = params.with_search_time(Duration::from_millis(time))
+                        }
+                        "infinite" => {
+                            params = params.set_infinite(true)
+                        }
+                        p => Err(UciError::InvalidParameter { got: Cow::Owned(p.to_string()), expected: "[searchmoves <moves> | ponder | wtime <ms> | btime <ms> | winc <ms> | binc <ms> | movestogo <n> | depth <n> | nodes <n> | mate <n> | movetime <ms> | infinite]" })?
+                    }
+                }
+                Ok(UciCommand::StartSearch(params))
             }
-            _ => return Err(()),
-        })
+            "stop" => Ok(UciCommand::StopSearch),
+            "ponderhit" => Ok(UciCommand::PonderHit),
+            "quit" => Ok(UciCommand::Quit),
+            verb => Err(UciError::UnknownCommandVerb(Cow::Owned(verb.to_string()))),
+        }
     }
 }
 
@@ -316,15 +375,14 @@ impl std::fmt::Display for UciMessage<'_> {
             }
             Self::Initialized => writeln!(f, "uciok"),
             Self::Ready => writeln!(f, "readyok"),
-            Self::SearchResult { best, ponder_on } => writeln!(
-                f,
-                "bestmove {best}{}",
+            Self::SearchResult { best, ponder_on } => {
+                write!(f, "bestmove {best}",)?;
                 if let Some(m) = ponder_on {
-                    format!(" ponder {m}")
+                    writeln!(f, " ponder {m}")
                 } else {
-                    String::new()
+                    writeln!(f)
                 }
-            ),
+            }
             Self::CopyrightCheck => writeln!(f, "copyprotection checking"),
             Self::CopyrightStatus(ok) => {
                 write!(f, "copyprotection {}", if *ok { "ok" } else { "error" })
@@ -333,37 +391,40 @@ impl std::fmt::Display for UciMessage<'_> {
             Self::RegistrationStatus(ok) => {
                 write!(f, "registration {}", if *ok { "ok" } else { "error" })
             }
-            Self::Information(infos) => writeln!(
-                f,
-                "info{}",
-                infos
-                    .iter()
-                    .fold(String::new(), |acc, info| format!("{acc} {info}"))
-            ),
+            Self::Information(infos) => {
+                write!(f, "info")?;
+                for info in infos {
+                    write!(f, " {info}")?
+                }
+                writeln!(f)
+            }
             Self::Debug(msg) => writeln!(f, "info string {msg}"),
-            Self::Option { name, field } => writeln!(
-                f,
-                "option name {name} type {}",
+            Self::Option { name, field } => {
+                write!(f, "option name {name} type ",)?;
                 match &field {
-                    UciOptionField::Boolean { default, .. } => format!("check default {default}"),
+                    UciOptionField::Boolean { default, .. } => {
+                        writeln!(f, "check default {default}")
+                    }
                     UciOptionField::IntegerRange {
                         min, max, default, ..
-                    } => format!("spin default {default} min {min} max {max}"),
+                    } => writeln!(f, "spin default {default} min {min} max {max}"),
                     UciOptionField::Choice {
                         possibilities,
                         default,
                         ..
-                    } => format!(
-                        "combo default {}{} ",
-                        possibilities[*default],
-                        possibilities
-                            .iter()
-                            .fold(String::new(), |acc, o| format!("{acc} {o}"))
-                    ),
-                    UciOptionField::String { default, .. } => format!("string default {default}"),
-                    UciOptionField::Button => "button".to_string(),
-                },
-            ),
+                    } => {
+                        write!(f, "combo default {}", possibilities[*default],)?;
+                        for possibility in possibilities {
+                            write!(f, " {possibility}")?;
+                        }
+                        writeln!(f)
+                    }
+                    UciOptionField::String { default, .. } => {
+                        writeln!(f, "string default {default}")
+                    }
+                    UciOptionField::Button => writeln!(f, "button"),
+                }
+            }
         }
     }
 }

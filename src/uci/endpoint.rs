@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 
-use super::commands::{UciCommand, UciMessage};
+use super::commands::{UciCommand, UciError, UciMessage};
 
 pub struct UciReader<I: Read> {
     inner: BufReader<I>,
@@ -14,10 +14,10 @@ impl<I: Read> UciReader<I> {
     }
 
     /// Reads a command.
-    pub fn read_command(&mut self) -> std::io::Result<Option<UciCommand>> {
+    pub fn read_command(&mut self) -> std::io::Result<Result<UciCommand, UciError>> {
         let mut buffer = String::new();
         self.inner.read_line(&mut buffer)?;
-        Ok(buffer.parse().ok())
+        Ok(buffer.parse())
     }
 }
 

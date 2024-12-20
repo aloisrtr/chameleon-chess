@@ -35,10 +35,6 @@ impl UciSearchParameters {
         self.ponder = ponder;
         self
     }
-    pub fn with_time_constraint(mut self, time: Duration) -> Self {
-        self.white_time = if time.is_zero() { None } else { Some(time) };
-        self
-    }
     pub fn with_white_time(mut self, time: Duration) -> Self {
         self.white_time = if time.is_zero() { None } else { Some(time) };
         self

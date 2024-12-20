@@ -225,6 +225,41 @@ impl From<&UciSearchParameters> for SearchConfig {
         Self::from(value.clone())
     }
 }
+impl std::fmt::Display for SearchConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.search_mate {
+            write!(f, "[mate search] ")?
+        }
+        if self.max_depth != u8::MAX {
+            write!(f, "max depth: {}, ", self.max_depth)?
+        }
+        if self.max_duration.0 != Duration::MAX {
+            write!(
+                f,
+                "max black duration: {}s, ",
+                self.max_duration.0.as_secs_f32()
+            )?
+        }
+        if self.max_duration.1 != Duration::MAX {
+            write!(
+                f,
+                "max white duration: {}s, ",
+                self.max_duration.1.as_secs_f32()
+            )?
+        }
+        if self.max_nodes != u64::MAX {
+            write!(f, "max nodes: {}, ", self.max_nodes)?
+        }
+        if !self.actions.is_empty() {
+            write!(f, "available actions: ")?;
+            for action in &self.actions {
+                write!(f, "{action} ")?
+            }
+            write!(f, ", ")?
+        }
+        write!(f, "workers: {}", self.threads)
+    }
+}
 
 /// Handle to an ongoing search.
 pub struct SearchHandle {
