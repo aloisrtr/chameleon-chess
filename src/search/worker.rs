@@ -110,7 +110,7 @@ impl<O: Write> MctsWorker<O> {
                     Value::Draw
                 }
             } else {
-                break;
+                Value::Draw
             };
             Self::backup(selected, reward, &mut position);
 

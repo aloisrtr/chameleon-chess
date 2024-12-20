@@ -234,9 +234,9 @@ impl Node {
     pub fn best_child(&self) -> Option<&Arc<Self>> {
         let children = unsafe { self.children.get().as_ref().unwrap() };
         children.iter().max_by(|c1, c2| {
-            c1.value()
-                .exploitation_score(self.perspective)
-                .total_cmp(&c2.value().exploitation_score(self.perspective))
+            let (_, v1) = c1.wins_and_visits();
+            let (_, v2) = c2.wins_and_visits();
+            v1.cmp(&v2)
         })
     }
 

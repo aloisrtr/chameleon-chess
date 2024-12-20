@@ -64,12 +64,8 @@ impl AttackInformation {
 pub struct Position {
     // 8x8 array to find which piece sits on which square.
     pieces: [Option<PieceKind>; 64],
-    // Bitboards are indexed by piece kind.
-    piece_bitboards: [Bitboard; 6],
-    // Bitboards containing occupancy information by color.
-    color_bitboards: [Bitboard; 2],
-    // Bitboard containing occupancy information.
-    occupancy_bitboard: Bitboard,
+    // Bitboards are indexed by piece kind + 2 and color.
+    bitboards: [Bitboard; 8],
 
     // Metadata
     side_to_move: Colour,
@@ -89,9 +85,7 @@ impl Default for Position {
     fn default() -> Self {
         Self {
             pieces: [None; 64],
-            piece_bitboards: [Bitboard::empty(); 6],
-            color_bitboards: [Bitboard::empty(); 2],
-            occupancy_bitboard: Bitboard::empty(),
+            bitboards: [Bitboard::empty(); 8],
 
             side_to_move: Colour::White,
             castling_rights: CastlingRights::none(),
@@ -126,10 +120,6 @@ impl Position {
     /// This function returns an error if the FEN string passed is invalid or badly
     /// formatted.
     pub fn from_fen(fen: &Fen) -> Self {
-        let mut color_bitboards = [Bitboard::empty(); 2];
-        color_bitboards.copy_from_slice(&fen.bitboards[0..2]);
-        let mut piece_bitboards = [Bitboard::empty(); 6];
-        piece_bitboards.copy_from_slice(&fen.bitboards[2..]);
         let mut pieces = [None; 64];
         for sq in Square::squares_fen_iter() {
             pieces[sq as usize] = fen.piece_on(sq).map(|(k, _)| k);
@@ -137,9 +127,7 @@ impl Position {
 
         let mut pos = Self {
             pieces,
-            color_bitboards,
-            piece_bitboards,
-            occupancy_bitboard: color_bitboards[0] | color_bitboards[1],
+            bitboards: fen.bitboards,
 
             side_to_move: fen.side_to_move,
             castling_rights: fen.castling_rights,
@@ -159,11 +147,8 @@ impl Position {
 
     /// Returns a FEN string describing the position.
     pub fn fen(&self) -> Fen {
-        let mut bitboards = [Bitboard::empty(); 8];
-        bitboards[0..2].copy_from_slice(self.color_bitboards.as_slice());
-        bitboards[2..].copy_from_slice(self.piece_bitboards.as_slice());
         Fen {
-            bitboards,
+            bitboards: self.bitboards,
             side_to_move: self.side_to_move,
             castling_rights: self.castling_rights,
             en_passant: self.en_passant_file.map(|file| {
@@ -209,9 +194,8 @@ impl Position {
     /// Placing a piece on an occupied square will result in undefined behavior.
     pub unsafe fn add_piece_unchecked(&mut self, on: Square, kind: PieceKind, colour: Colour) {
         let bb = on.bitboard();
-        self.piece_bitboards[kind as usize] |= bb;
-        self.color_bitboards[colour as usize] |= bb;
-        self.occupancy_bitboard |= bb;
+        *self.piece_bitboard_mut(kind) |= bb;
+        *self.color_bitboard_mut(colour) |= bb;
         self.pieces[on as usize] = Some(kind);
 
         self.hash ^= zobrist::piece_hash(kind, colour, on);
@@ -223,7 +207,7 @@ impl Position {
         self.pieces[square as usize].map(|kind| {
             (
                 kind,
-                if self.color_bitboards[1].is_set(square) {
+                if self.color_bitboard(Colour::Black).is_set(square) {
                     Colour::Black
                 } else {
                     Colour::White
@@ -256,23 +240,28 @@ impl Position {
     }
 
     #[inline(always)]
+    fn occupied_squares(&self) -> Bitboard {
+        self.color_bitboard(Colour::White) | self.color_bitboard(Colour::Black)
+    }
+
+    #[inline(always)]
     fn piece_bitboard(&self, kind: PieceKind) -> Bitboard {
-        unsafe { *self.piece_bitboards.get_unchecked(kind as usize) }
+        unsafe { *self.bitboards.get_unchecked(kind as usize + 2) }
     }
 
     #[inline(always)]
     fn piece_bitboard_mut(&mut self, kind: PieceKind) -> &mut Bitboard {
-        unsafe { self.piece_bitboards.get_unchecked_mut(kind as usize) }
+        unsafe { self.bitboards.get_unchecked_mut(kind as usize + 2) }
     }
 
     #[inline(always)]
     fn color_bitboard(&self, colour: Colour) -> Bitboard {
-        unsafe { *self.color_bitboards.get_unchecked(colour as usize) }
+        unsafe { *self.bitboards.get_unchecked(colour as usize) }
     }
 
     #[inline(always)]
     fn color_bitboard_mut(&mut self, colour: Colour) -> &mut Bitboard {
-        unsafe { self.color_bitboards.get_unchecked_mut(colour as usize) }
+        unsafe { self.bitboards.get_unchecked_mut(colour as usize) }
     }
 
     /// Makes a move on the board, modifying the position.
@@ -339,7 +328,6 @@ impl Position {
                 };
                 *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
                 *self.piece_bitboard_mut(captured) ^= target.bitboard();
-                self.occupancy_bitboard ^= target.bitboard();
                 self.hash ^= zobrist::piece_hash(captured, self.side_to_move.inverse(), target);
                 self.remove_piece_feature(captured, target, self.side_to_move.inverse())
             }
@@ -359,7 +347,6 @@ impl Position {
             };
             *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
             *self.piece_bitboard_mut(captured) ^= target.bitboard();
-            self.occupancy_bitboard ^= target.bitboard();
             self.hash ^= zobrist::piece_hash(captured, self.side_to_move.inverse(), target);
             self.remove_piece_feature(captured, target, self.side_to_move.inverse());
             self.reversible_moves = 0
@@ -378,7 +365,6 @@ impl Position {
             let rook_move = rook_origin.bitboard() | rook_target.bitboard();
             *self.piece_bitboard_mut(PieceKind::Rook) ^= rook_move;
             *self.color_bitboard_mut(self.side_to_move) ^= rook_move;
-            self.occupancy_bitboard ^= rook_move;
             *self.pieces.get_unchecked_mut(rook_target as usize) =
                 self.pieces.get_unchecked_mut(rook_origin as usize).take();
             self.hash ^= zobrist::piece_hash(PieceKind::Rook, self.side_to_move, rook_origin);
@@ -399,7 +385,6 @@ impl Position {
         // Then make the actual move on the board
         *self.color_bitboard_mut(self.side_to_move) ^= move_bitboard;
         *self.piece_bitboard_mut(moving_kind) ^= move_bitboard;
-        self.occupancy_bitboard ^= move_bitboard;
         *self.pieces.get_unchecked_mut(target as usize) =
             self.pieces.get_unchecked_mut(origin as usize).take();
         self.hash ^= zobrist::piece_hash(moving_kind, self.side_to_move, origin);
@@ -448,7 +433,6 @@ impl Position {
         };
         *self.color_bitboard_mut(self.side_to_move) ^= move_bitboard;
         *self.piece_bitboard_mut(moving_kind) ^= move_bitboard;
-        self.occupancy_bitboard ^= move_bitboard;
         self.add_piece_feature(moving_kind, origin, self.side_to_move);
         self.remove_piece_feature(moving_kind, target, self.side_to_move);
 
@@ -468,7 +452,6 @@ impl Position {
                 };
                 *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
                 *self.piece_bitboard_mut(captured) ^= target.bitboard();
-                self.occupancy_bitboard ^= target.bitboard();
                 unsafe {
                     *self.pieces.get_unchecked_mut(target as usize) = Some(captured);
                 }
@@ -489,7 +472,6 @@ impl Position {
             let captured = captured.unwrap_or(PieceKind::Pawn);
             *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
             *self.piece_bitboard_mut(captured) ^= target.bitboard();
-            self.occupancy_bitboard ^= target.bitboard();
             unsafe {
                 *self.pieces.get_unchecked_mut(target as usize) = Some(captured);
             }
@@ -509,7 +491,6 @@ impl Position {
             let rook_move = rook_origin.bitboard() | rook_target.bitboard();
             *self.piece_bitboard_mut(PieceKind::Rook) ^= rook_move;
             *self.color_bitboard_mut(self.side_to_move) ^= rook_move;
-            self.occupancy_bitboard ^= rook_move;
             unsafe {
                 *self.pieces.get_unchecked_mut(rook_origin as usize) =
                     self.pieces.get_unchecked_mut(rook_target as usize).take()
@@ -524,6 +505,7 @@ impl Position {
     pub fn attack_information(&self) -> AttackInformation {
         let us = self.color_bitboard(self.side_to_move);
         let them = self.color_bitboard(self.side_to_move.inverse());
+        let occupied = us | them;
         let king_square = self.king_square(self.side_to_move);
         let king = king_square.bitboard();
 
@@ -565,9 +547,9 @@ impl Position {
         // - or the piece can attack our king when xraying our pieces. In this case, the slider might create a pin.
 
         // We need to xray our king to account for slide-aways attacked squares.
-        let non_king = self.occupancy_bitboard ^ king;
+        let non_king = occupied ^ king;
 
-        // Diagonal attacks
+        // Diagonal attackers
         let ennemy_bishops = self.piece_bitboard(PieceKind::Bishop) & them;
         let ennemy_rooks = self.piece_bitboard(PieceKind::Rook) & them;
         let ennemy_queens = self.piece_bitboard(PieceKind::Queen) & them;
@@ -587,7 +569,7 @@ impl Position {
             // ray to the movable squares.
             if attack.is_set(king_square) {
                 checkers |= origin.bitboard();
-                check_rays |= diagonal_moves(origin, self.occupancy_bitboard) & king_diagonal_rays;
+                check_rays |= diagonal_moves(origin, occupied) & king_diagonal_rays;
             }
             // This piece is accessible by our king when ignoring our own pieces, so it
             // might create a pin. This is checked by counting the number of our own pieces
@@ -630,8 +612,7 @@ impl Position {
             // ray to the movable squares.
             if attack.is_set(king_square) {
                 checkers |= origin.bitboard();
-                check_rays |=
-                    king_orthogonal_rays & orthogonal_moves(origin, self.occupancy_bitboard);
+                check_rays |= king_orthogonal_rays & orthogonal_moves(origin, occupied);
             }
             // This piece is accessible by our king when ignoring our own pieces, so it
             // might create a pin. This is checked by counting the number of our own pieces
@@ -648,7 +629,9 @@ impl Position {
                         // SAFETY: we already checked that there is a set square.
                         let pinned_square = unsafe { pin.lowest_set_square_unchecked() };
 
-                        let kind = self.pieces[pinned_square as usize].unwrap();
+                        let Some(kind) = self.pieces[pinned_square as usize] else {
+                            panic!("Detected pin on {pinned_square} with ray\n{ray:?}\nbut there is no piece here\n{self}");
+                        };
                         if kind.is_orthogonal_slider() || kind == PieceKind::Pawn {
                             let movable_ray = (ray ^ pin) | origin.bitboard();
                             unsafe {
@@ -720,6 +703,8 @@ impl Position {
         // Initialize some generally useful constants.
         let mut us = self.color_bitboard(self.side_to_move);
         let them = self.color_bitboard(self.side_to_move.inverse());
+        let occupied = us | them;
+        let free = !occupied;
 
         let king_square = self.king_square(self.side_to_move);
 
@@ -732,7 +717,7 @@ impl Position {
         // If more than one checker, no moves other than the king's are legal.
         // Otherwise, we generate moves as we generally do.
         let mut capturable = them;
-        let mut movable = !self.occupancy_bitboard;
+        let mut movable = free;
         if attacks.in_check() {
             capturable = attacks.checkers;
             movable = attacks.check_rays;
@@ -746,7 +731,7 @@ impl Position {
             }
 
             for (sq, ray) in &attacks.movable_pins {
-                let movable = ray & !self.occupancy_bitboard;
+                let movable = ray & free;
                 let capturable = ray & them;
                 let origin = sq.bitboard();
                 match self.pieces[*sq as usize] {
@@ -794,15 +779,23 @@ impl Position {
 
         // We always generate king moves.
         let king_moves = king_moves(king_square) & !attacks.attacked;
-        for m in (king_moves & !self.occupancy_bitboard).map(|t| Action::new_quiet(king_square, t))
-        {
-            unsafe { moves.push_unchecked(m) }
-        }
-        for m in (king_moves & them).map(|t| Action::new_capture(king_square, t)) {
-            unsafe { moves.push_unchecked(m) }
-        }
+        Self::serialize_piece_moves(&mut moves, king_square, king_moves, free, them);
 
         moves
+    }
+
+    #[inline(always)]
+    fn serialize_piece_moves(
+        moves: &mut ActionList,
+        origin: Square,
+        targets: Bitboard,
+        movable: Bitboard,
+        capturable: Bitboard,
+    ) {
+        let quiets = (targets & movable).map(|t| Action::new_quiet(origin, t));
+        moves.extend(quiets);
+        let captures = (targets & capturable).map(|t| Action::new_capture(origin, t));
+        moves.extend(captures);
     }
 
     #[inline(always)]
@@ -813,15 +806,9 @@ impl Position {
         movable: Bitboard,
         capturable: Bitboard,
     ) {
-        // GENERAL SAFETY: calls to `push_unchecked` are ok, we can't generate too many moves.
         for origin in diagonal_sliders {
-            let diagonal_moves = diagonal_moves(origin, self.occupancy_bitboard);
-            for m in (diagonal_moves & movable).map(|t| Action::new_quiet(origin, t)) {
-                unsafe { moves.push_unchecked(m) }
-            }
-            for m in (diagonal_moves & capturable).map(|t| Action::new_capture(origin, t)) {
-                unsafe { moves.push_unchecked(m) }
-            }
+            let diagonal_moves = diagonal_moves(origin, self.occupied_squares());
+            Self::serialize_piece_moves(moves, origin, diagonal_moves, movable, capturable);
         }
     }
 
@@ -833,15 +820,9 @@ impl Position {
         movable: Bitboard,
         capturable: Bitboard,
     ) {
-        // GENERAL SAFETY: calls to `push_unchecked` are ok, we can't generate too many moves.
         for origin in orthogonal_sliders {
-            let orthogonal_moves = orthogonal_moves(origin, self.occupancy_bitboard);
-            for m in (orthogonal_moves & movable).map(|t| Action::new_quiet(origin, t)) {
-                unsafe { moves.push_unchecked(m) }
-            }
-            for m in (orthogonal_moves & capturable).map(|t| Action::new_capture(origin, t)) {
-                unsafe { moves.push_unchecked(m) }
-            }
+            let orthogonal_moves = orthogonal_moves(origin, self.occupied_squares());
+            Self::serialize_piece_moves(moves, origin, orthogonal_moves, movable, capturable);
         }
     }
 
@@ -853,15 +834,9 @@ impl Position {
         movable: Bitboard,
         capturable: Bitboard,
     ) {
-        // GENERAL SAFETY: calls to `push_unchecked` are ok, we can't generate too many moves.
         for origin in knights {
             let knight_moves = knight_moves(origin);
-            for m in (knight_moves & movable).map(|t| Action::new_quiet(origin, t)) {
-                unsafe { moves.push_unchecked(m) }
-            }
-            for m in (knight_moves & capturable).map(|t| Action::new_capture(origin, t)) {
-                unsafe { moves.push_unchecked(m) }
-            }
+            Self::serialize_piece_moves(moves, origin, knight_moves, movable, capturable);
         }
     }
 
@@ -884,39 +859,27 @@ impl Position {
         // Remove promoting pawns from the pawn list to deal with them separately.
         let pawns = pawns ^ promoting;
 
-        let single_push_targets = (pawns + push) & !self.occupancy_bitboard;
+        let single_push_targets = (pawns + push) & !self.occupied_squares();
         let single_push_origins = (single_push_targets & movable) - push;
-        for m in single_push_origins
-            .zip(single_push_targets & movable)
-            .map(|(o, t)| Action::new_quiet(o, t))
-        {
-            unsafe { moves.push_unchecked(m) }
+        for (o, t) in single_push_origins.zip(single_push_targets & movable) {
+            unsafe { moves.push_unchecked(Action::new_quiet(o, t)) }
         }
         let double_push_targets = ((single_push_targets & double_push_rank) + push) & movable;
         let double_push_origins = double_push_targets - push - push;
-        for m in double_push_origins
-            .zip(double_push_targets)
-            .map(|(o, t)| Action::new_double_push(o, t))
-        {
-            unsafe { moves.push_unchecked(m) }
+        for (o, t) in double_push_origins.zip(double_push_targets) {
+            unsafe { moves.push_unchecked(Action::new_double_push(o, t)) }
         }
 
         let east_captures_targets = ((pawns & !File::H.bitboard()) + east_attack) & capturable;
         let east_captures_origins = east_captures_targets - east_attack;
 
-        for m in east_captures_origins
-            .zip(east_captures_targets)
-            .map(|(o, t)| Action::new_capture(o, t))
-        {
-            unsafe { moves.push_unchecked(m) }
+        for (o, t) in east_captures_origins.zip(east_captures_targets) {
+            unsafe { moves.push_unchecked(Action::new_capture(o, t)) }
         }
         let west_captures_targets = ((pawns & !File::A.bitboard()) + west_attack) & capturable;
         let west_captures_origins = west_captures_targets - west_attack;
-        for m in west_captures_origins
-            .zip(west_captures_targets)
-            .map(|(o, t)| Action::new_capture(o, t))
-        {
-            unsafe { moves.push_unchecked(m) }
+        for (o, t) in west_captures_origins.zip(west_captures_targets) {
+            unsafe { moves.push_unchecked(Action::new_capture(o, t)) }
         }
 
         // Same for promoting pawns
@@ -988,7 +951,7 @@ impl Position {
                 // left the board
                 if !(orthogonal_moves(
                     self.king_square(self.side_to_move),
-                    self.occupancy_bitboard & !(captured | east_attacker),
+                    self.occupied_squares() & !(captured | east_attacker),
                 ) & capture_rank)
                     .intersects(ennemy_orthogonals)
                 {
@@ -999,7 +962,7 @@ impl Position {
                 // Same for west attacks
                 if !(orthogonal_moves(
                     self.king_square(self.side_to_move),
-                    self.occupancy_bitboard & !(captured | west_attacker),
+                    self.occupied_squares() & !(captured | west_attacker),
                 ) & capture_rank)
                     .intersects(ennemy_orthogonals)
                 {
@@ -1045,7 +1008,7 @@ impl Position {
         let king_square = self.king_square(perspective);
 
         for colour in [Colour::Black, Colour::White] {
-            let colour_bb = self.color_bitboards[colour as usize];
+            let colour_bb = self.color_bitboard(colour);
             for piece_kind in [
                 PieceKind::Pawn,
                 PieceKind::Knight,
@@ -1053,7 +1016,7 @@ impl Position {
                 PieceKind::Rook,
                 PieceKind::Queen,
             ] {
-                for piece_square in self.piece_bitboards[piece_kind as usize] & colour_bb {
+                for piece_square in self.piece_bitboard(piece_kind) & colour_bb {
                     features.push(feature_index(king_square, piece_square, piece_kind, colour))
                 }
             }
@@ -1104,12 +1067,12 @@ impl Position {
         if side.is_black() {
             self.castling_rights.queenside_castle_allowed(Colour::Black)
                 && !self
-                    .occupancy_bitboard
+                    .occupied_squares()
                     .intersects(Bitboard(0xe00000000000000))
                 && !attacked.intersects(Bitboard(0xc00000000000000))
         } else {
             self.castling_rights.queenside_castle_allowed(Colour::White)
-                && !self.occupancy_bitboard.intersects(Bitboard(0xe))
+                && !self.occupied_squares().intersects(Bitboard(0xe))
                 && !attacked.intersects(Bitboard(0xc))
         }
     }
@@ -1119,12 +1082,12 @@ impl Position {
         if side.is_black() {
             self.castling_rights.kingside_castle_allowed(Colour::Black)
                 && !self
-                    .occupancy_bitboard
+                    .occupied_squares()
                     .intersects(Bitboard(0x6000000000000000))
                 && !attacked.intersects(Bitboard(0x6000000000000000))
         } else {
             self.castling_rights.kingside_castle_allowed(Colour::White)
-                && !self.occupancy_bitboard.intersects(Bitboard(0x60))
+                && !self.occupied_squares().intersects(Bitboard(0x60))
                 && !attacked.intersects(Bitboard(0x60))
         }
     }
