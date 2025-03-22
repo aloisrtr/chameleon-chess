@@ -2,11 +2,12 @@
 //!
 //! This includes making, unmaking and generating moves, defining positions from
 //! FEN strings, etc.
+
 use crate::brain::feature::{feature_index, piece_feature_index};
 use std::hint::unreachable_unchecked;
 
 use super::{
-    action::{Action, PcnMove, SanMove},
+    action::{Action, SanMove, UciMove},
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::Colour,
@@ -20,16 +21,18 @@ use super::{
 
 pub type ActionList = heapless::Vec<Action, 256>;
 
+/// Indicates that an illegal move was played.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 // TODO: More precise errors
 pub struct IllegalMoveError;
 
+/// Indicates placement errors for pieces, leading to incorrect positions.
 pub enum PlaceError {
     SquareOccupied { kind: PieceKind, colour: Colour },
     TooManyKings(Colour),
 }
 
-/// Store attack information for a given position.
+/// Stores attack information for a given position.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AttackInformation {
     checkers: Bitboard,
@@ -45,7 +48,9 @@ impl AttackInformation {
         self.checkers.cardinality()
     }
 
-    /// Returns `true` if there is at least one checker.
+    /// Returns `true` if there is at least one checker. Combined with [`Position::actions`],
+    /// this can be used to acertain whether the side to move is in checkmate or
+    /// stalemate.
     #[inline(always)]
     pub fn in_check(&self) -> bool {
         self.checkers.is_not_empty()
@@ -106,7 +111,7 @@ impl Position {
         Self::default()
     }
 
-    /// The initial position of chess.
+    /// The initial position of Chess.
     pub fn initial() -> Self {
         Self::from_fen(
             &"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -115,10 +120,7 @@ impl Position {
         )
     }
 
-    /// Creates a position from a FEN string.
-    /// # Errors
-    /// This function returns an error if the FEN string passed is invalid or badly
-    /// formatted.
+    /// Creates a position from a parsed FEN string.
     pub fn from_fen(fen: &Fen) -> Self {
         let mut pieces = [None; 64];
         for sq in Square::squares_fen_iter() {
@@ -167,6 +169,7 @@ impl Position {
     }
 
     /// Adds a piece on the board on the given square.
+    ///
     /// # Errors
     /// Returns an error if the square is not empty, or when trying to place a second
     /// king for any side.
@@ -190,6 +193,7 @@ impl Position {
     }
 
     /// Adds a piece on the board on the given square.
+    ///
     /// # Safety
     /// Placing a piece on an occupied square will result in undefined behavior.
     pub unsafe fn add_piece_unchecked(&mut self, on: Square, kind: PieceKind, colour: Colour) {
@@ -202,7 +206,7 @@ impl Position {
         self.add_piece_feature(kind, on, colour)
     }
 
-    /// Returns the piece kind and color sitting on a given square if any.
+    /// Returns the piece kind and color present on a given square if any.
     pub fn piece_on(&self, square: Square) -> Option<(PieceKind, Colour)> {
         self.pieces[square as usize].map(|kind| {
             (
@@ -221,8 +225,10 @@ impl Position {
         self.side_to_move
     }
 
-    /// Tries to get an [`Action`] from the given [`PureCoordinateNotationMove`].
-    pub fn get_action(&self, notation: PcnMove) -> Option<Action> {
+    /// Tries to convert a [`UciMove`] to a usable [`Action`].
+    ///
+    /// Return `None` if the move was illegal to play in this position.
+    pub fn get_action(&self, notation: UciMove) -> Option<Action> {
         self.actions()
             .iter()
             .find(|a| {
@@ -233,8 +239,17 @@ impl Position {
             .copied()
     }
 
-    /// Returns an [`Action`] as a [`StandardAlgebraicNotation`] encoded move.
-    pub fn as_san(&self, action: Action) -> Option<SanMove> {
+    /// Converts a [`SanMove`] into an [`Action`].
+    ///
+    /// Returns `None` if the move was illegal in the current position.
+    pub fn encode_san(&self, san: SanMove) -> Option<Action> {
+        todo!("Conversion SAN -> Action not yet implemented")
+    }
+
+    /// Converts an [`Action`] into a [`SanMove`].
+    ///
+    /// Returns `None` if `action` was illegal in the current position.
+    pub fn decode_san(&self, action: Action) -> Option<SanMove> {
         let (moving_piece, _) = self.piece_on(action.origin())?;
         if action.is_kingside_castle() {
             Some(SanMove::KingSideCastle)
@@ -297,6 +312,7 @@ impl Position {
     }
 
     /// Makes a move on the board, modifying the position.
+    ///
     /// # Errors
     /// This function returns an error if the move is illegal.
     pub fn make(&mut self, action: Action) -> Result<(), IllegalMoveError> {
@@ -331,6 +347,7 @@ impl Position {
     }
 
     /// Makes a move on the board, modifying the position.
+    ///
     /// # Safety
     /// Passing an illegal move to this function will break the invariants of the
     /// [`Position`] structure, making it unusable.
@@ -462,7 +479,7 @@ impl Position {
         self.hash ^= zobrist::side_to_move_hash();
     }
 
-    /// Undoes the effects of the last move played, restoring the position as it
+    /// Undoes the last move played, restoring the position as it
     /// was prior to the move.
     ///
     /// If no moves were played prior to calling this function, nothing happens.
@@ -720,7 +737,7 @@ impl Position {
 
     /// Returns the pawn push delta for the given colour.
     #[inline(always)]
-    pub const fn pawn_push(colour: Colour) -> Delta {
+    const fn pawn_push(colour: Colour) -> Delta {
         if colour.is_black() {
             Delta::South
         } else {
@@ -730,7 +747,7 @@ impl Position {
 
     /// Pawn attacks deltas for the given colour.
     #[inline(always)]
-    pub const fn pawn_attacks(colour: Colour) -> (Delta, Delta) {
+    const fn pawn_attacks(colour: Colour) -> (Delta, Delta) {
         if colour.is_black() {
             (Delta::SouthEast, Delta::SouthWest)
         } else {
@@ -740,7 +757,7 @@ impl Position {
 
     /// Returns the pawns double push rank for the given colour.
     #[inline(always)]
-    pub const fn pawn_double_push_rank(colour: Colour) -> Rank {
+    const fn pawn_double_push_rank(colour: Colour) -> Rank {
         if colour.is_black() {
             Rank::Six
         } else {
@@ -750,7 +767,7 @@ impl Position {
 
     /// Returns the pawns promotion rank for the given colour.
     #[inline(always)]
-    pub const fn pawn_promotion_rank(colour: Colour) -> Rank {
+    const fn pawn_promotion_rank(colour: Colour) -> Rank {
         if colour.is_black() {
             Rank::Two
         } else {
@@ -761,8 +778,7 @@ impl Position {
     /// Generates a list of legal moves in the current position.
     ///
     /// If this function returns an empty list, the side to move is in stalemate or checkmate.
-    /// An additional flag is returned for this situation: if `true`, the side to move
-    /// is in check.
+    /// This can be checked using [`Position::attack_information`].
     pub fn actions(&self) -> ActionList {
         let mut moves = ActionList::new();
 
@@ -1056,20 +1072,20 @@ impl Position {
         self.reversible_moves >= 100
     }
 
-    /// Returns `true` if the accumulator should be refreshed.
-    pub fn should_refresh_features(&self) -> bool {
+    /// Returns `true` if the NNUE accumulator should be refreshed.
+    pub(crate) fn should_refresh_features(&self) -> bool {
         self.should_refresh
     }
 
-    /// Clears accumulated features and refresh flag.
-    pub fn clear_features(&mut self) {
+    /// Clears accumulated NNUE features and refresh flag.
+    pub(crate) fn clear_features(&mut self) {
         self.should_refresh = false;
         self.added_features.clear();
         self.removed_features.clear();
     }
 
-    /// Returns a vector of active feature indices for this position.
-    pub fn active_features(&self, perspective: Colour) -> Vec<u16> {
+    /// Returns a vector of active NNUE feature indices for this position.
+    pub(crate) fn active_features(&self, perspective: Colour) -> Vec<u16> {
         let mut features = vec![];
         let king_square = self.king_square(perspective);
 
@@ -1090,13 +1106,13 @@ impl Position {
         features
     }
 
-    /// Returns accumulated added features.
-    pub fn added_features(&self) -> &[u16] {
+    /// Returns accumulated added NNUE features.
+    pub(crate) fn added_features(&self) -> &[u16] {
         &self.added_features
     }
 
-    /// Returns accumulated removed features.
-    pub fn removed_features(&self) -> &[u16] {
+    /// Returns accumulated removed NNUE features.
+    pub(crate) fn removed_features(&self) -> &[u16] {
         &self.removed_features
     }
 

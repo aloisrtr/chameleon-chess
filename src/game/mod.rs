@@ -1,5 +1,5 @@
-//! # Chess API
-//! This module contains everything Chess related, like the board state, actions,
+//! # Core Chess API
+//! This module contains everything Chess related such as the board state, actions,
 //! scoring, etc.
 
 pub mod action;

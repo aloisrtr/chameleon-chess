@@ -1,4 +1,6 @@
-//! # Actions (or moves)
+//! # Representation, parsing and formatting of chess actions (moves).
+//! Contains multiple move representations (internal, UCI and SAN) complete with
+//! methods for formatting, converting and parsing such representations.
 
 use super::{
     colour::Colour,
@@ -6,9 +8,13 @@ use super::{
     square::{File, Rank, Square},
 };
 
-/// Describes a move using a from-to \<promotion\> approach, with all relevant
-/// information.
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
+/// Internal efficient representation of moves using a from-to \<promotion\> approach,
+/// with all relevant information stored compactly.
+///
+/// Most methods of this type are only visible at the crate level, as it provides
+/// poor and low-level API for modifying, parsing or accessing move information.
+/// Users should instead opt to use either [`UciMove`] or [`SanMove`].
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Action(u16);
 impl Action {
     const ORIGIN_MASK: u16 = 0x003F;
@@ -21,24 +27,28 @@ impl Action {
 
     /// Creates a new quiet move.
     #[inline(always)]
-    pub const fn new_quiet(origin: Square, target: Square) -> Self {
+    pub(crate) const fn new_quiet(origin: Square, target: Square) -> Self {
         Self(origin as u16 | (target as u16) << 6)
     }
 
     /// Creates a new capture.
     #[inline(always)]
-    pub const fn new_capture(origin: Square, target: Square) -> Self {
+    pub(crate) const fn new_capture(origin: Square, target: Square) -> Self {
         Self(origin as u16 | (target as u16) << 6 | Self::CAPTURE)
     }
 
     /// Creates a new double push.
     #[inline(always)]
-    pub const fn new_double_push(origin: Square, target: Square) -> Self {
+    pub(crate) const fn new_double_push(origin: Square, target: Square) -> Self {
         Self(origin as u16 | (target as u16) << 6 | Self::SPECIAL_0)
     }
 
     /// Returns a new promoting move.
-    pub const fn new_promotion(origin: Square, target: Square, promoting_to: PieceKind) -> Self {
+    pub(crate) const fn new_promotion(
+        origin: Square,
+        target: Square,
+        promoting_to: PieceKind,
+    ) -> Self {
         Self(
             origin as u16
                 | (target as u16) << 6
@@ -49,7 +59,7 @@ impl Action {
 
     /// Creates a set of promotions from a pawn push.
     #[inline(always)]
-    pub const fn new_promotions(origin: Square, target: Square) -> [Self; 4] {
+    pub(crate) const fn new_promotions(origin: Square, target: Square) -> [Self; 4] {
         let general_move = origin as u16 | (target as u16) << 6 | Self::PROMOTION;
         [
             Self(general_move),
@@ -60,7 +70,7 @@ impl Action {
     }
 
     /// Returns a new promoting move with capture.
-    pub const fn new_promotion_capture(
+    pub(crate) const fn new_promotion_capture(
         origin: Square,
         target: Square,
         promoting_to: PieceKind,
@@ -76,7 +86,7 @@ impl Action {
 
     /// Creates a set of promotions from a pawn capture.
     #[inline(always)]
-    pub const fn new_promotion_captures(origin: Square, target: Square) -> [Self; 4] {
+    pub(crate) const fn new_promotion_captures(origin: Square, target: Square) -> [Self; 4] {
         let general_move = origin as u16 | (target as u16) << 6 | Self::PROMOTION | Self::CAPTURE;
         [
             Self(general_move),
@@ -88,13 +98,13 @@ impl Action {
 
     /// Creates an en passant capture.
     #[inline(always)]
-    pub const fn new_en_passant(origin: Square, target: Square) -> Self {
+    pub(crate) const fn new_en_passant(origin: Square, target: Square) -> Self {
         Self(origin as u16 | (target as u16) << 6 | Self::CAPTURE | Self::SPECIAL_0)
     }
 
     /// Creates an en passant queenside castle move.
     #[inline(always)]
-    pub const fn new_queenside_castle(side: Colour) -> Self {
+    pub(crate) const fn new_queenside_castle(side: Colour) -> Self {
         if side.is_black() {
             Self(Square::E8 as u16 | (Square::C8 as u16) << 6 | Self::SPECIAL_0 | Self::SPECIAL_1)
         } else {
@@ -104,7 +114,7 @@ impl Action {
 
     /// Creates an en passant kingside castle move.
     #[inline(always)]
-    pub const fn new_kingside_castle(side: Colour) -> Self {
+    pub(crate) const fn new_kingside_castle(side: Colour) -> Self {
         if side.is_black() {
             Self(Square::E8 as u16 | (Square::G8 as u16) << 6 | Self::SPECIAL_1)
         } else {
@@ -114,24 +124,24 @@ impl Action {
 
     /// Returns the square the move originates from.
     #[inline(always)]
-    pub const fn origin(self) -> Square {
+    pub(crate) const fn origin(self) -> Square {
         unsafe { Square::from_index_unchecked((self.0 & Self::ORIGIN_MASK) as u8) }
     }
     /// Returns the square the move targets.
     #[inline(always)]
-    pub const fn target(self) -> Square {
+    pub(crate) const fn target(self) -> Square {
         unsafe { Square::from_index_unchecked(((self.0 & Self::TARGET_MASK) >> 6) as u8) }
     }
 
     /// Checks if this move is a capture.
     #[inline(always)]
-    pub const fn is_capture(self) -> bool {
+    pub(crate) const fn is_capture(self) -> bool {
         self.0 & Self::CAPTURE != 0
     }
 
     /// Checks if this move is a promotion, and returns the promotion target if so.
     #[inline(always)]
-    pub const fn promotion_target(self) -> Option<PieceKind> {
+    pub(crate) const fn promotion_target(self) -> Option<PieceKind> {
         if self.0 & Self::PROMOTION != 0 {
             Some(unsafe {
                 std::mem::transmute::<u8, PieceKind>(
@@ -144,7 +154,8 @@ impl Action {
     }
 
     /// Checks if this move encodes a queenside castle.
-    pub const fn is_queenside_castle(self) -> bool {
+    #[inline(always)]
+    pub(crate) const fn is_queenside_castle(self) -> bool {
         self.promotion_target().is_none()
             && !self.is_capture()
             && self.special_1_is_set()
@@ -152,7 +163,8 @@ impl Action {
     }
 
     /// Checks if this move encodes a kingside castle.
-    pub const fn is_kingside_castle(self) -> bool {
+    #[inline(always)]
+    pub(crate) const fn is_kingside_castle(self) -> bool {
         self.promotion_target().is_none()
             && !self.is_capture()
             && self.special_1_is_set()
@@ -186,16 +198,35 @@ impl std::fmt::Display for Action {
     }
 }
 
-/// Pure coordinate notation move, mainly used for parsing UCI.
+/// Pure coordinate notation move, mainly used for parsing UCI commands.
 ///
-/// These can be passed to a [`Position`] instance to convert them into usable moves.
-#[derive(Clone, Copy, Hash, Eq, PartialEq, Debug)]
-pub struct PcnMove {
+/// These can be passed to a [`Position`](crate::game::position::Position) to convert them into [`Action`],
+/// which are then usable for making moves.
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct UciMove {
     pub from: Square,
     pub to: Square,
     pub promoting_to: Option<PieceKind>,
 }
-impl std::fmt::Display for PcnMove {
+impl From<Action> for UciMove {
+    fn from(value: Action) -> Self {
+        Self {
+            from: value.origin(),
+            to: value.target(),
+            promoting_to: value.promotion_target(),
+        }
+    }
+}
+impl From<&Action> for UciMove {
+    fn from(value: &Action) -> Self {
+        Self {
+            from: value.origin(),
+            to: value.target(),
+            promoting_to: value.promotion_target(),
+        }
+    }
+}
+impl std::fmt::Display for UciMove {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", self.from, self.to)?;
         if let Some(kind) = self.promoting_to {
@@ -204,7 +235,8 @@ impl std::fmt::Display for PcnMove {
         Ok(())
     }
 }
-impl std::str::FromStr for PcnMove {
+impl std::str::FromStr for UciMove {
+    // TODO: Parsing errors
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let from = s[0..2].parse().unwrap();
@@ -229,8 +261,13 @@ impl std::str::FromStr for PcnMove {
     }
 }
 
-/// Standard Algebraic Notation encoded move, mainly for use in Portable Game Notation
+/// Standard Algebraic Notation (SAN) encoded move, mainly used in Portable Game Notation
 /// and/or for human-readability (in UCI debug mode for example).
+///
+/// SAN encoded moves include/lack context that is ommitted/required by other move representations,
+/// and therefore cannot be directly converted to/obtained from [`Action`] or [`UciMove`] types.
+/// Refer to [`Position::encode_san`](crate::game::position::Position::encode_san) and [`Position::decode_san`](crate::game::position::Position::decode_san) for conversions.
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SanMove {
     PawnMove {
         origin_file: File,
@@ -288,5 +325,13 @@ impl std::fmt::Display for SanMove {
             Self::KingSideCastle => write!(f, "O-O"),
             Self::QueenSideCastle => write!(f, "O-O-O"),
         }
+    }
+}
+impl std::str::FromStr for SanMove {
+    // TODO: parsing errors
+    type Err = ();
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        todo!("SAN parsing is not yet implemented")
     }
 }

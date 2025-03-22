@@ -1,15 +1,17 @@
 //! Colours for each players and their pieces.
 
+/// Number of different colours (2).
 pub const NUM_COLOURS: usize = 2;
 
+/// Colour enumeration.
 #[repr(u8)]
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub enum Colour {
     White = 0,
     Black = 1,
 }
 impl Colour {
-    /// Inverts the colour.
+    /// Inverts the colour in place.
     #[inline]
     pub fn invert(&mut self) {
         *self = if self.is_black() {

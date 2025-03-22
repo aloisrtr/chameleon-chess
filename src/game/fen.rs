@@ -1,4 +1,11 @@
-//! # FEN string utilities
+//! # Forsyth-Edwards Notation (FEN) utilities.
+//!
+//! Allows parsing, formatting and provides a clean API over FEN strings.
+//!
+//! ## Compression/Decompression
+//! The `serde` feature allows for streaming compression/decompression capabilities. These
+//! algorithms are made much more efficient if running on a CPU with BMI2 expansion, but
+//! will work on any CPU.
 
 use crate::game::square::Rank;
 
@@ -9,13 +16,14 @@ use super::{
     piece::{PieceKind, NUM_PIECES},
     square::Square,
 };
+
 #[cfg(feature = "serde")]
 use bitstream_io::{BitRead, BitWrite};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Error)]
 // TODO: Better FEN parsing error reports.
-/// FEN parsing errors.
+/// FEN parsing errors with context.
 pub enum FenError {
     #[error("Unexpected character at index {index}: {val}")]
     UnexpectedToken { index: usize, val: char },
@@ -31,6 +39,7 @@ pub enum FenError {
     TooManySquares,
 }
 
+/// FEN string representation.
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Fen {
     pub(crate) bitboards: [Bitboard; NUM_COLOURS + NUM_PIECES],
@@ -46,7 +55,7 @@ impl Fen {
         fen.parse()
     }
 
-    /// Returns the piece kind and colour on a given square if any.
+    /// Returns the [`PieceKind`] and [`Colour`] of a piece on a given square if any.
     pub fn piece_on(&self, square: Square) -> Option<(PieceKind, Colour)> {
         let sq_bb = square.bitboard();
 

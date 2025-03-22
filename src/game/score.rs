@@ -1,9 +1,20 @@
-//! # Utilities to handle scores in Chess (centipawns, win probability, ...)
+//! # Utilities to handle different ways of scoring Chess positions (centipawns, win probability, etc).
 
+/// Represents the probability of winning in the interval [0, 1], from the perspective
+/// of white pieces. Values `< 0.5` indicate an advantage for black pieces, while
+/// value `> 0.5` indicate an advantage for white pieces.
+///
+/// A value of 0.5 is given to positions considered neutral.
 pub type WinProbability = f32;
+
+/// Centipawn units advantage. Positive values indicates an advantage for white pieces,
+/// while negative values indicate an advantage for black pieces.
+///
+/// A value of 0 is given to positions considered neutral.
 pub type CentiPawns = i32;
 
 const CP_TO_WIN_PROB_CONST: WinProbability = 4.;
+
 /// Converts a [`WinProbability`] into equivalent [`CentiPawns`] score.
 /// # Example
 /// ```

@@ -63,6 +63,11 @@ impl File {
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
+
+    /// The index of this file.
+    pub fn as_index(self) -> u8 {
+        self as u8
+    }
 }
 impl std::fmt::Display for File {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -83,6 +88,7 @@ impl std::fmt::Display for File {
     }
 }
 impl std::str::FromStr for File {
+    // TODO: better errors
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -163,6 +169,11 @@ impl Rank {
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
         std::mem::transmute(index)
     }
+
+    /// The index of this rank.
+    pub fn as_index(self) -> u8 {
+        self as u8
+    }
 }
 impl std::fmt::Display for Rank {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -170,6 +181,7 @@ impl std::fmt::Display for Rank {
     }
 }
 impl std::str::FromStr for Rank {
+    // TODO: better errors
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -274,6 +286,18 @@ impl Square {
         } else {
             None
         }
+    }
+
+    /// Returns the index of this square between 0 and 64, in little-endian rank-file mapping.
+    ///
+    /// # Example
+    /// ```
+    /// # use horsey::game::square::*;
+    /// assert_eq!(Square::E5.as_index(), 36);
+    /// ```
+    #[inline]
+    pub const fn as_index(self) -> u8 {
+        self as u8
     }
 
     /// Instantitates a new square from its index.
@@ -407,6 +431,7 @@ impl std::fmt::Display for Square {
     }
 }
 impl std::str::FromStr for Square {
+    // TODO: better error
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -445,6 +470,7 @@ pub enum Delta {
     KnightWestSouth = -10,
 }
 impl Delta {
+    /// Deltas used by knight moves.
     pub const KNIGHT_DELTAS: [Self; 8] = [
         Self::KnightNorthEast,
         Self::KnightNorthWest,
@@ -455,6 +481,11 @@ impl Delta {
         Self::KnightEastSouth,
         Self::KnightWestSouth,
     ];
+
+    /// Deltas in all cardinal directions, which corresponds to queen moves.
+    ///
+    /// The first half of these are orthogonal deltas (rooks), while the rest
+    /// are diagonal (bishops).
     pub const QUEEN_DELTAS: [Self; 8] = [
         Self::North,
         Self::South,

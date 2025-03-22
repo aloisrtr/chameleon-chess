@@ -1,4 +1,7 @@
-//! # Perft testing/benchmarking
+//! # Perft testing/benchmarking utilities.
+//!
+//! Mainly used for validating the move generation function and/or benchmarking
+//! its speed on given positions.
 
 use std::time::Instant;
 
@@ -16,7 +19,7 @@ pub struct PerftConfig {
     pub show_board: bool,
 }
 impl PerftConfig {
-    /// Whether to show the board and ascii art at the start of the program.
+    /// Whether to show the board and ASCII art at the start of the test.
     ///
     /// Should be disabled when trying to parse the output.
     pub fn show_board(mut self, value: bool) -> Self {
@@ -30,13 +33,13 @@ impl PerftConfig {
         self
     }
 
-    /// If set to true, the run will start from all depth between 1 and the maximum.
+    /// If set to `true`, the run will start from all depth between 1 and the maximum iteratively.
     pub fn iterative_deepening(mut self, value: bool) -> Self {
         self.iterative = value;
         self
     }
 
-    /// If set to true, simply returns the number of the legal moves at horizon nodes.
+    /// If set to `true`, simply returns the number of the legal moves at horizon nodes.
     pub fn bulk_counting(mut self, value: bool) -> Self {
         self.bulk_counting = value;
         self
@@ -54,7 +57,7 @@ impl PerftConfig {
         self
     }
 
-    /// Runs a Perft test on the given position.
+    /// Runs a Perft test on the given position with the set configuration.
     pub fn go(&self, position: &mut Position) {
         if self.show_board {
             println!(

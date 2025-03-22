@@ -1,5 +1,3 @@
-//! # Representation of castling rights
-
 use std::str::FromStr;
 
 use super::{
@@ -8,6 +6,8 @@ use super::{
     square::Square,
     zobrist::{CASTLING_RIGHTS_OFFSET, ZOBRIST_KEYS},
 };
+
+/// Efficient representation of castling rights.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CastlingRights(u8);
 impl CastlingRights {
@@ -29,7 +29,7 @@ impl CastlingRights {
         Self(Self::EMPTY)
     }
 
-    /// Checks if no one can castle.
+    /// Returns `true` if none of the sides can castle.
     pub const fn is_none(self) -> bool {
         self.0 == Self::EMPTY
     }
@@ -43,6 +43,7 @@ impl CastlingRights {
             self.0 & Self::KINGSIDE_WHITE != 0
         }
     }
+
     /// Checks if kingside castling is allowed for a certain colour.
     #[inline(always)]
     pub const fn queenside_castle_allowed(self, colour: Colour) -> bool {
@@ -53,7 +54,7 @@ impl CastlingRights {
         }
     }
 
-    /// Disallows queenside for a given side.
+    /// Disallows kingside castling for a given side.
     #[inline(always)]
     pub fn disallow_kingside_castle(&mut self, colour: Colour) {
         self.0 &= if colour.is_black() {
@@ -62,7 +63,7 @@ impl CastlingRights {
             !Self::KINGSIDE_WHITE
         }
     }
-    /// Disallows queenside for a given side.
+    /// Disallows queenside castling for a given side.
     #[inline(always)]
     pub fn disallow_queenside_castle(&mut self, colour: Colour) {
         self.0 &= if colour.is_black() {
@@ -71,7 +72,8 @@ impl CastlingRights {
             !Self::QUEENSIDE_WHITE
         }
     }
-    /// Disallows castling for a given side.
+
+    /// Disallows both castling moves for a given side.
     pub fn disallow(&mut self, colour: Colour) {
         self.0 &= if colour.is_black() {
             !(Self::QUEENSIDE_BLACK | Self::KINGSIDE_BLACK)
@@ -80,7 +82,7 @@ impl CastlingRights {
         }
     }
 
-    /// Allows queenside for a given side.
+    /// Allows kingside castling for a given side.
     #[inline(always)]
     pub fn allow_kingside_castle(&mut self, colour: Colour) {
         self.0 |= if colour.is_black() {
@@ -89,7 +91,7 @@ impl CastlingRights {
             Self::KINGSIDE_WHITE
         }
     }
-    /// Allows queenside for a given side.
+    /// Allows queenside castling for a given side.
     #[inline(always)]
     pub fn allow_queenside_castle(&mut self, colour: Colour) {
         self.0 |= if colour.is_black() {
@@ -98,7 +100,8 @@ impl CastlingRights {
             Self::QUEENSIDE_WHITE
         }
     }
-    /// Allows castling for a given side.
+
+    /// Allows both castling moves for a given side.
     pub fn allow(&mut self, colour: Colour) {
         self.0 |= if colour.is_black() {
             Self::QUEENSIDE_BLACK | Self::KINGSIDE_BLACK
@@ -109,7 +112,7 @@ impl CastlingRights {
 
     /// Returns the Zobrist hash of these castling rights.
     #[inline(always)]
-    pub fn zobrist_hash(self) -> u64 {
+    pub(crate) fn zobrist_hash(self) -> u64 {
         let mut hash = 0;
         for i in 0..4 {
             let mask = 1 << i;
@@ -122,7 +125,7 @@ impl CastlingRights {
 
     /// Returns the castling mask for rooks.
     #[inline(always)]
-    pub fn castle_mask(self) -> Bitboard {
+    pub(crate) fn castle_mask(self) -> Bitboard {
         let mut res = Bitboard::empty();
         if self.kingside_castle_allowed(Colour::White) {
             res |= Square::H1.bitboard()
@@ -140,6 +143,7 @@ impl CastlingRights {
     }
 }
 impl FromStr for CastlingRights {
+    // TODO: better error
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut rights = 0;

@@ -4,7 +4,7 @@
 use thiserror::Error;
 
 use crate::game::{
-    action::{Action, PcnMove},
+    action::{Action, UciMove},
     fen::Fen,
     score::CentiPawns,
 };
@@ -50,7 +50,7 @@ pub enum UciCommand<'a> {
     NewGame,
     SetPosition {
         fen: Option<Fen>,
-        moves: Vec<PcnMove>,
+        moves: Vec<UciMove>,
     },
     StartSearch(UciSearchParameters),
     StopSearch,
