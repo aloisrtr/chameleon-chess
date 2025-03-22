@@ -1,8 +1,8 @@
 [package]
-name = "chameleon-chess"
+name = "horsey"
 version = "0.1.0"
 edition = "2021"
-authors = ["Aloïs Rautureau <alois.rautureau@ens-rennes.fr>"]
+authors = ["Aloïs Rautureau <thinkingrocks@proton.me>"]
 license = "MIT OR Apache 2.0"
 description = "A chess engine that adapts to its opponent."
 
