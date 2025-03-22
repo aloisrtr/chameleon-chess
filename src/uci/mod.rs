@@ -142,8 +142,8 @@ fn initialize_engine<O: Write>(
     let mut writer = writer.lock().unwrap();
     // Register the engine
     writer.send_message(UciMessage::Identity {
-        name: String::from("chameleon-chess"),
-        author: String::from("Aloïs Rautureau"),
+        name: String::from(env!("CARGO_PKG_NAME")),
+        author: String::from(env!("CARGO_PKG_AUTHORS")),
     })?;
 
     // Send available options

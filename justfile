@@ -1,4 +1,4 @@
-validate_perft:
+validate-perft:
     cargo test perft -- --include-ignored
 
 test:
@@ -10,7 +10,7 @@ flamegraph:
 run:
     cargo run
 
-run_release:
+run-release:
     cargo run --release
 
 build:
@@ -19,5 +19,5 @@ build:
 release:
     cargo build --release
 
-release_native:
+release-native:
     RUSTFLAGS="-C target-cpu=native" cargo build --release

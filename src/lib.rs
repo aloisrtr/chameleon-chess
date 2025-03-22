@@ -1,4 +1,4 @@
-//! # chameleon
+//! # Horsey
 //! A chess engine based on Monte-Carlo Tree Search and
 //! NNUE evaluation.
 //!

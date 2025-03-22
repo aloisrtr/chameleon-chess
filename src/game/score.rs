@@ -7,7 +7,7 @@ const CP_TO_WIN_PROB_CONST: WinProbability = 4.;
 /// Converts a [`WinProbability`] into equivalent [`CentiPawns`] score.
 /// # Example
 /// ```
-/// # use chameleon_chess::game::score::*;
+/// # use horsey::game::score::*;
 /// assert_eq!(win_probability_to_centipawns(0.5), 0);
 /// ```
 pub fn win_probability_to_centipawns(probability: WinProbability) -> CentiPawns {
@@ -17,7 +17,7 @@ pub fn win_probability_to_centipawns(probability: WinProbability) -> CentiPawns 
 /// Converts a [`CentiPawns`] score into equivalent [`WinProbability`].
 /// # Example
 /// ```
-/// # use chameleon_chess::game::score::*;
+/// # use horsey::game::score::*;
 /// assert_eq!(centipawns_to_win_probability(0), 0.5);
 /// ```
 pub fn centipawns_to_win_probability(cp: CentiPawns) -> WinProbability {

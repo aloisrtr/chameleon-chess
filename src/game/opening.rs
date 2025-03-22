@@ -1,5 +1,5 @@
-//! # Opening format of chameleon
-//! Chameleon stores opening information (name, moves, WDL score, etc) as a tree.
+//! # Opening format
+//! Horsey stores opening information (name, moves, WDL score, etc) as a tree.
 //!
 //! Nodes of the tree contain:
 //! - name of the opening (if any)

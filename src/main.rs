@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-#[cfg(feature = "perft")]
-use chameleon_chess::game::perft::PerftConfig;
-#[cfg(feature = "train")]
-use chameleon_chess::{brain::training::selfplay, search::SearchConfig};
-use chameleon_chess::{game::position::Position, uci::uci_client};
 use clap::{Parser, Subcommand};
+#[cfg(feature = "perft")]
+use horsey::game::perft::PerftConfig;
+#[cfg(feature = "train")]
+use horsey::{brain::training::selfplay, search::SearchConfig};
+use horsey::{game::position::Position, uci::uci_client};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -80,7 +80,7 @@ pub fn main() {
         }
         #[cfg(not(feature = "perft"))]
         Command::Perft { .. } => {
-            eprintln!("Chameleon has not been compiled with feature `perft`");
+            eprintln!("Horsey has not been compiled with feature `perft`");
         }
         #[cfg(feature = "train")]
         Command::SelfPlay { games, output } => {
@@ -92,7 +92,7 @@ pub fn main() {
         }
         #[cfg(not(feature = "train"))]
         Command::SelfPlay { .. } => {
-            eprintln!("Chameleon has not been compiled with feature `train`");
+            eprintln!("Horsey has not been compiled with feature `train`");
         }
     }
 }

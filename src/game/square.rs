@@ -36,7 +36,7 @@ impl File {
     ///
     /// # Exemple
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// assert_eq!(File::from_index(2), Some(File::C));
     /// assert!(File::from_index(10).is_none());
     /// ```
@@ -56,7 +56,7 @@ impl File {
     ///
     /// # Exemple
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// assert_eq!(unsafe { File::from_index_unchecked(2) }, File::C);
     /// ```
     #[inline]
@@ -135,7 +135,7 @@ impl Rank {
     ///
     /// # Exemple
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     ///
     /// assert_eq!(Rank::from_index(4), Some(Rank::Five));
     /// assert!(Rank::from_index(12).is_none());
@@ -156,7 +156,7 @@ impl Rank {
     ///
     /// # Exemple
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// assert_eq!(unsafe { Rank::from_index_unchecked(4) },Rank::Five);
     /// ```
     #[inline]
@@ -250,7 +250,7 @@ impl Square {
     /// Instantiates a new square based on file and rank.
     /// # Example
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// assert_eq!(Square::new(File::A, Rank::Four), Square::A4);
     /// ```
     #[inline]
@@ -264,7 +264,7 @@ impl Square {
     ///
     /// # Example
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// assert_eq!(Square::from_index(4), Some(Square::E1));
     /// ```
     #[inline]
@@ -288,7 +288,7 @@ impl Square {
     /// Returns the rank of the square.
     /// # Example
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// assert_eq!(Square::A4.rank(), Rank::Four);
     /// ```
     #[inline]
@@ -299,7 +299,7 @@ impl Square {
     /// Returns the file of the square.
     /// # Example
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// assert_eq!(Square::A4.file(), File::A);
     /// ```
     #[inline]
@@ -313,7 +313,7 @@ impl Square {
     ///
     /// # Example
     /// ```
-    /// # use chameleon_chess::game::square::*;
+    /// # use horsey::game::square::*;
     /// let square = Square::E1;
     /// assert_eq!(square.translate(Delta::North), Some(Square::E2));
     /// assert!(square.translate(Delta::South).is_none());
