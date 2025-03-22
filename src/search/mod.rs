@@ -15,7 +15,10 @@ use node::{Node, Value};
 use worker::MctsWorker;
 
 use crate::{
-    game::{action::Action, position::Position},
+    game::{
+        action::{Action, PcnMove},
+        position::Position,
+    },
     uci::{endpoint::UciWriter, search::UciSearchParameters},
 };
 
@@ -26,7 +29,7 @@ mod worker;
 pub struct SearchConfig {
     max_duration: (Duration, Duration),
     max_depth: u8,
-    actions: Vec<Action>,
+    actions: Vec<PcnMove>,
     max_nodes: u64,
     threads: u32,
     search_mate: bool,
@@ -124,7 +127,7 @@ impl SearchConfig {
     /// Sets a list of actions that the search should limit itself to.
     ///
     /// Any non-legal action present in the list will be ignored.
-    pub fn actions_to_search(mut self, actions: &[Action]) -> Self {
+    pub fn actions_to_search(mut self, actions: &[PcnMove]) -> Self {
         self.actions = Vec::from(actions);
         self
     }
@@ -223,6 +226,41 @@ impl From<UciSearchParameters> for SearchConfig {
 impl From<&UciSearchParameters> for SearchConfig {
     fn from(value: &UciSearchParameters) -> Self {
         Self::from(value.clone())
+    }
+}
+impl std::fmt::Display for SearchConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.search_mate {
+            write!(f, "[mate search] ")?
+        }
+        if self.max_depth != u8::MAX {
+            write!(f, "max depth: {}, ", self.max_depth)?
+        }
+        if self.max_duration.0 != Duration::MAX {
+            write!(
+                f,
+                "max black duration: {}s, ",
+                self.max_duration.0.as_secs_f32()
+            )?
+        }
+        if self.max_duration.1 != Duration::MAX {
+            write!(
+                f,
+                "max white duration: {}s, ",
+                self.max_duration.1.as_secs_f32()
+            )?
+        }
+        if self.max_nodes != u64::MAX {
+            write!(f, "max nodes: {}, ", self.max_nodes)?
+        }
+        if !self.actions.is_empty() {
+            write!(f, "available actions: ")?;
+            for action in &self.actions {
+                write!(f, "{action} ")?
+            }
+            write!(f, ", ")?
+        }
+        write!(f, "workers: {}", self.threads)
     }
 }
 

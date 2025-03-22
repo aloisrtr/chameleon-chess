@@ -5,12 +5,12 @@ use std::{
     time::Duration,
 };
 
-use crate::game::action::Action;
+use crate::game::action::PcnMove;
 
 /// A builder to create clean parameters of search from the server to the engine.
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
 pub struct UciSearchParameters {
-    pub(crate) available_moves: Vec<Action>,
+    pub(crate) available_moves: Vec<PcnMove>,
     pub(crate) ponder: bool,
     pub(crate) white_time: Option<Duration>,
     pub(crate) black_time: Option<Duration>,
@@ -27,16 +27,12 @@ impl UciSearchParameters {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn with_available_moves(mut self, moves: &[Action]) -> Self {
+    pub fn with_available_moves(mut self, moves: &[PcnMove]) -> Self {
         self.available_moves = Vec::from(moves);
         self
     }
     pub fn set_ponder(mut self, ponder: bool) -> Self {
         self.ponder = ponder;
-        self
-    }
-    pub fn with_time_constraint(mut self, time: Duration) -> Self {
-        self.white_time = if time.is_zero() { None } else { Some(time) };
         self
     }
     pub fn with_white_time(mut self, time: Duration) -> Self {

@@ -6,7 +6,7 @@ use crate::brain::feature::{feature_index, piece_feature_index};
 use std::hint::unreachable_unchecked;
 
 use super::{
-    action::Action,
+    action::{Action, PcnMove, SanMove},
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::Colour,
@@ -221,22 +221,88 @@ impl Position {
         self.side_to_move
     }
 
+    /// Tries to get an [`Action`] from the given [`PureCoordinateNotationMove`].
+    pub fn get_action(&self, notation: PcnMove) -> Option<Action> {
+        self.actions()
+            .iter()
+            .find(|a| {
+                a.origin() == notation.from
+                    && a.target() == notation.to
+                    && a.promotion_target() == notation.promoting_to
+            })
+            .copied()
+    }
+
+    /// Returns an [`Action`] as a [`StandardAlgebraicNotation`] encoded move.
+    pub fn as_san(&self, action: Action) -> Option<SanMove> {
+        let (moving_piece, _) = self.piece_on(action.origin())?;
+        if action.is_kingside_castle() {
+            Some(SanMove::KingSideCastle)
+        } else if action.is_queenside_castle() {
+            Some(SanMove::QueenSideCastle)
+        } else if moving_piece == PieceKind::Pawn {
+            Some(SanMove::PawnMove {
+                origin_file: action.origin().file(),
+                is_capture: action.is_capture(),
+                target: action.target(),
+                promoting_to: action.promotion_target(),
+            })
+        } else {
+            let candidates: Vec<_> = self
+                .actions()
+                .into_iter()
+                .filter_map(|a| {
+                    if a.target() == action.target()
+                        && self.piece_on(a.origin()).unwrap().0 == moving_piece
+                        && a.origin() != action.origin()
+                    {
+                        Some(a.origin())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let (origin_file, origin_rank) = if candidates.is_empty() {
+                // No ambiguity
+                (None, None)
+            } else {
+                let file_ambiguity: Vec<_> = candidates
+                    .into_iter()
+                    .filter(|o| o.file() == action.origin().file())
+                    .collect();
+                if file_ambiguity.is_empty() {
+                    // No file ambiguity
+                    (Some(action.origin().file()), None)
+                } else {
+                    let rank_ambiguity = file_ambiguity
+                        .into_iter()
+                        .any(|o| o.rank() == action.origin().rank());
+                    if !rank_ambiguity {
+                        // No rank ambiguity
+                        (None, Some(action.origin().rank()))
+                    } else {
+                        (Some(action.origin().file()), Some(action.origin().rank()))
+                    }
+                }
+            };
+            Some(SanMove::PieceMove {
+                moving_piece,
+                origin_file,
+                origin_rank,
+                is_capture: action.is_capture(),
+                target: action.target(),
+            })
+        }
+    }
+
     /// Makes a move on the board, modifying the position.
     /// # Errors
     /// This function returns an error if the move is illegal.
     pub fn make(&mut self, action: Action) -> Result<(), IllegalMoveError> {
-        if let Some(&mv) = self.actions().iter().find(|mv| {
-            mv.origin() == action.origin()
-                && mv.target() == action.target()
-                && mv.promotion_target() == action.promotion_target()
-        }) {
-            unsafe {
-                self.make_unchecked(mv);
-            }
-            Ok(())
-        } else {
-            Err(IllegalMoveError)
-        }
+        // TODO: make this actually safe eheh
+        unsafe { self.make_unchecked(action) };
+        Ok(())
     }
 
     #[inline(always)]

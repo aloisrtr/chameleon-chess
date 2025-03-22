@@ -12,7 +12,7 @@
 //! - the engine should never start searching or pondering without receiving a `go` command
 //! - all `go` commands are preceded by a `position` command
 //! - by default, book management should be done by the server
-//! - the implementation should be **fault tolerant**, unexpected tokens or commands should be ignored
+//! - the implementation should be **fault tolerant**, unexpected tokens or commands should be ignored (although they are reported in debug mode)
 //!
 //! ## Move format
 //! UCI uses **long algebraic notation** for moves, i.e. `<from><to>[promotion]`.
@@ -49,8 +49,8 @@ pub fn uci_client() -> std::io::Result<()> {
     let mut options = setup_options();
 
     'uci: loop {
-        match reader.read_command() {
-            Ok(Some(cmd)) => {
+        match reader.read_command()? {
+            Ok(cmd) => {
                 match cmd {
                     UciCommand::Initialize => initialize_engine(&writer, &options)?,
                     UciCommand::IsReady => send_message(&writer, UciMessage::Ready)?,
@@ -65,21 +65,26 @@ pub fn uci_client() -> std::io::Result<()> {
                     }
                     UciCommand::SetPosition { fen, moves } => {
                         position = if let Some(fen) = fen {
-                            Position::from_fen(&fen.parse().unwrap())
+                            Position::from_fen(&fen)
                         } else {
                             Position::initial()
                         };
                         for m in moves {
-                            if position.make(m).is_err() {
+                            let Some(action) = position.get_action(m) else {
                                 send_debug_message(
                                     &writer,
-                                    format!("Illegal move in position command: {m}, quitting"),
+                                    format!("Illegal move in position command: {m}"),
                                     debug,
                                 )?;
-                                panic!();
-                            }
+                                break;
+                            };
+                            position.make(action).unwrap()
                         }
-                        send_debug_message(&writer, format!("{position}"), debug)?
+                        send_debug_message(
+                            &writer,
+                            format!("Set position to: {}", position.fen()),
+                            debug,
+                        )?
                     }
                     UciCommand::StartSearch(params) => {
                         if let Some(mut handle) = search_handle.take() {
@@ -94,7 +99,7 @@ pub fn uci_client() -> std::io::Result<()> {
                         }
                         send_debug_message(
                             &writer,
-                            format!("Running search with parameters {config:?}"),
+                            format!("Running search with parameters: {config}"),
                             debug,
                         )?;
                         search_handle = Some(config.go(position.clone(), writer.clone()));
@@ -104,14 +109,12 @@ pub fn uci_client() -> std::io::Result<()> {
                             handle.stop();
                         }
                     }
-                    UciCommand::PonderHit => todo!("pondering is not yet implemented"),
                     UciCommand::Quit => break 'uci,
                     _ => (),
                 }
             }
 
-            Ok(None) => send_debug_message(&writer, "Failed to parse command", debug)?,
-            Err(e) => eprintln!("Error {e:?}"),
+            Err(e) => send_debug_message(&writer, format!("{e}"), debug)?,
         }
     }
 
@@ -123,8 +126,8 @@ fn setup_options() -> BTreeMap<String, UciOptionField> {
     options.insert(
         "SearchWorkers".to_string(),
         UciOptionField::IntegerRange {
-            actual: 1,
-            default: 1,
+            actual: num_cpus::get_physical() as i32,
+            default: num_cpus::get_physical() as i32,
             min: 1,
             max: num_cpus::get_physical() as i32,
         },
