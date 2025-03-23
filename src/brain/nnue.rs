@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use crate::game::colour::Colour;
+use crate::chess::colour::Colour;
 
 use super::feature::FEATURES_COUNT;
 

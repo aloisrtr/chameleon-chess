@@ -35,7 +35,7 @@ This requires compiling the engine with the `perft` feature flag.
 ### Library
 Full access to the engine's power is available through its Rust crate. The crate
 is divided in multiple segments:
-- `game` contains the core Chess API. Interacting with positions, moves or pieces is done through the types defined in this module.
+- `chess` contains the core Chess API. Interacting with positions, moves or pieces is done through the types defined in this module.
 - `search` grants access to the various search routines implemented by Horsey with full configuration, async/parallel/blocking routines and more.
 - `uci` contains everything needed for UCI compatibility, both from a client and server perspective.
 - `brain` is used to access Horsey's value and policy networks, self-play and training routines.

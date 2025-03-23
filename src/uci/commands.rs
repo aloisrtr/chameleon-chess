@@ -3,7 +3,7 @@
 
 use thiserror::Error;
 
-use crate::game::{
+use crate::chess::{
     action::{Action, UciMove},
     fen::Fen,
     score::CentiPawns,

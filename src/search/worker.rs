@@ -13,7 +13,7 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use crate::{
     brain::nnue::{self, NnueAccumulator},
-    game::{colour::Colour, position::Position, score::*},
+    chess::{colour::Colour, position::Position, score::*},
     uci::{
         commands::{UciInformation, UciMessage},
         endpoint::UciWriter,

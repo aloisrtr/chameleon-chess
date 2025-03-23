@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 #[cfg(feature = "perft")]
-use horsey::game::perft::PerftConfig;
+use horsey::chess::perft::PerftConfig;
 #[cfg(feature = "train")]
 use horsey::{brain::training::selfplay, search::SearchConfig};
-use horsey::{game::position::Position, uci::uci_client};
+use horsey::{chess::position::Position, uci::uci_client};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

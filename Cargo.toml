@@ -31,9 +31,9 @@ opt-level = 2
 incremental = true
 
 [features]
-default = ["perft", "serde"]
+default = ["perft", "fen-compression"]
 perft = []
-serde = ["dep:serde", "dep:bitstream-io"]
+fen-compression = ["dep:serde", "dep:bitstream-io"]
 train = ["dep:burn"]
 
 

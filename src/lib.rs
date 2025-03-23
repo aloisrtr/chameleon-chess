@@ -7,6 +7,6 @@
 #![feature(portable_simd)]
 
 pub mod brain;
-pub mod game;
+pub mod chess;
 pub mod search;
 pub mod uci;

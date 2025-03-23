@@ -7,7 +7,7 @@ use crate::brain::feature::{feature_index, piece_feature_index};
 use std::hint::unreachable_unchecked;
 
 use super::{
-    action::{Action, SanMove, UciMove},
+    action::{Action, ChessMove, SanMove, UciMove},
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::Colour,
@@ -30,6 +30,21 @@ pub struct IllegalMoveError;
 pub enum PlaceError {
     SquareOccupied { kind: PieceKind, colour: Colour },
     TooManyKings(Colour),
+}
+
+/// Possible result of the game.
+pub enum GameResult {
+    Checkmate(Colour),
+    Draw(DrawKind),
+}
+
+/// All possible kinds of draw.
+pub enum DrawKind {
+    Stalemate,
+    Repetition,
+    FiftyMoveRule,
+    InsufficientMaterial,
+    Agreement,
 }
 
 /// Stores attack information for a given position.
@@ -225,28 +240,48 @@ impl Position {
         self.side_to_move
     }
 
+    /// Checks if `action` is legal to play in this position.
+    pub fn is_legal(&self, action: Action) -> bool {
+        self.actions().contains(&action)
+    }
+
     /// Tries to convert a [`UciMove`] to a usable [`Action`].
     ///
     /// Return `None` if the move was illegal to play in this position.
-    pub fn get_action(&self, notation: UciMove) -> Option<Action> {
+    pub fn encode_uci(&self, action: UciMove) -> Option<Action> {
         self.actions()
             .iter()
             .find(|a| {
-                a.origin() == notation.from
-                    && a.target() == notation.to
-                    && a.promotion_target() == notation.promoting_to
+                a.origin() == action.origin
+                    && a.target() == action.target
+                    && a.promotion_target() == action.promoting_to
             })
             .copied()
     }
 
-    /// Converts a [`SanMove`] into an [`Action`].
+    /// Tries to convert an [`Action`] to a [`UciMove`].
+    ///
+    /// Return `None` if the move was illegal to play in this position.
+    pub fn decode_uci(&self, action: Action) -> Option<UciMove> {
+        if self.is_legal(action) {
+            Some(UciMove {
+                origin: action.origin(),
+                target: action.target(),
+                promoting_to: action.promotion_target(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Tries to convert a [`SanMove`] into an [`Action`].
     ///
     /// Returns `None` if the move was illegal in the current position.
     pub fn encode_san(&self, san: SanMove) -> Option<Action> {
         todo!("Conversion SAN -> Action not yet implemented")
     }
 
-    /// Converts an [`Action`] into a [`SanMove`].
+    /// Tries to convert an [`Action`] into a [`SanMove`].
     ///
     /// Returns `None` if `action` was illegal in the current position.
     pub fn decode_san(&self, action: Action) -> Option<SanMove> {
@@ -315,10 +350,13 @@ impl Position {
     ///
     /// # Errors
     /// This function returns an error if the move is illegal.
-    pub fn make(&mut self, action: Action) -> Result<(), IllegalMoveError> {
-        // TODO: make this actually safe eheh
-        unsafe { self.make_unchecked(action) };
-        Ok(())
+    pub fn make<M: ChessMove>(&mut self, action: &M) -> Result<(), IllegalMoveError> {
+        if let Some(action) = action.to_action(self) {
+            unsafe { self.make_unchecked(action) };
+            Ok(())
+        } else {
+            Err(IllegalMoveError)
+        }
     }
 
     #[inline(always)]
@@ -735,6 +773,33 @@ impl Position {
         }
     }
 
+    /// Returns the result of the game in the current position, or `None` if the
+    /// game is not finished.
+    ///
+    /// The only two kind of draws that are not checked by this method are:
+    /// - draws agreed to by both players
+    /// - timeout draws
+    pub fn game_result(&self) -> Option<GameResult> {
+        if self.fifty_move_draw() {
+            return Some(GameResult::Draw(DrawKind::FiftyMoveRule));
+        }
+        if self.threefold_repetition() {
+            return Some(GameResult::Draw(DrawKind::Repetition));
+        }
+        if self.insufficient_material() {
+            return Some(GameResult::Draw(DrawKind::InsufficientMaterial));
+        }
+        if self.actions().is_empty() {
+            if self.attack_information().in_check() {
+                Some(GameResult::Checkmate(self.side_to_move))
+            } else {
+                Some(GameResult::Draw(DrawKind::Stalemate))
+            }
+        } else {
+            None
+        }
+    }
+
     /// Returns the pawn push delta for the given colour.
     #[inline(always)]
     const fn pawn_push(colour: Colour) -> Delta {
@@ -1072,6 +1137,60 @@ impl Position {
         self.reversible_moves >= 100
     }
 
+    /// Checks if the position is a "dead position" aka no side can force checkmate
+    /// due to insufficient material.
+    ///
+    /// It checks for the following scenarios:
+    /// - King vs King
+    /// - King + Minor piece vs King
+    /// - King + Bishop vs King + Bishop (bishops of the same color)
+    ///
+    /// Note that this function is purely material based and follows Article 5.2.2 of
+    /// the FIDE rules. It does not account for likely draws.
+    pub fn insufficient_material(&self) -> bool {
+        // Bare king on both sides
+        if self.color_bitboard(Colour::White).cardinality() == 1
+            && self.color_bitboard(Colour::Black).cardinality() == 1
+        {
+            return true;
+        }
+
+        let knights = self.piece_bitboard(PieceKind::Knight);
+        let bishops = self.piece_bitboard(PieceKind::Bishop);
+        let others = [PieceKind::Pawn, PieceKind::Rook, PieceKind::Queen]
+            .into_iter()
+            .fold(Bitboard::empty(), |acc, kind| {
+                acc | self.piece_bitboard(kind)
+            });
+        let white_pieces = self.color_bitboard(Colour::White);
+        let black_pieces = self.color_bitboard(Colour::Black);
+
+        let white_others_count = (others & white_pieces).cardinality();
+        let black_others_count = (others & black_pieces).cardinality();
+
+        if white_others_count != 0 && black_others_count != 0 {
+            let white_knights_count = (knights & white_pieces).cardinality();
+            let black_knights_count = (knights & black_pieces).cardinality();
+            let white_bishops_count = (bishops & white_pieces).cardinality();
+            let black_bishops_count = (bishops & black_pieces).cardinality();
+            let white_minor_pieces = white_bishops_count + white_knights_count;
+            let black_minor_pieces = black_bishops_count + black_knights_count;
+            return match (white_minor_pieces, black_minor_pieces) {
+                (0, 1) | (1, 0) => true,
+                (1, 1) => {
+                    let bishops_on_dark_squares =
+                        self.piece_bitboard(PieceKind::Bishop) & Square::DARK_SQUARES;
+                    white_bishops_count == 1
+                        && black_bishops_count == 1
+                        && bishops_on_dark_squares.cardinality() != 1
+                }
+                _ => false,
+            };
+        }
+
+        false
+    }
+
     /// Returns `true` if the NNUE accumulator should be refreshed.
     pub(crate) fn should_refresh_features(&self) -> bool {
         self.should_refresh
@@ -1260,7 +1379,7 @@ impl std::fmt::Display for Position {
 
 #[cfg(test)]
 mod test {
-    use crate::game::{action::Action, square::Square};
+    use crate::chess::{action::Action, square::Square};
 
     use super::Position;
 
@@ -1268,7 +1387,7 @@ mod test {
     fn hash_test() {
         let mut pos = Position::initial();
         let og_hash = pos.zobrist_hash();
-        pos.make(Action::new_double_push(Square::E2, Square::E4))
+        pos.make(&Action::new_double_push(Square::E2, Square::E4))
             .unwrap();
         pos.unmake();
         assert_eq!(og_hash, pos.zobrist_hash())

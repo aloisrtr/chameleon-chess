@@ -5,8 +5,24 @@
 use super::{
     colour::Colour,
     piece::PieceKind,
+    position::Position,
     square::{File, Rank, Square},
 };
+
+/// Generic trait for types that can act as chess moves. This trait includes conversions
+/// from and to the internal [`Action`] representation using a [`Position`](crate::chess::position::Position)
+/// object for added context, and can be used as input to [`Position::make`](crate::chess::position::Position::make).
+pub trait ChessMove: Sized {
+    /// Converts an internal representation of [`Actions`](self::Action) to this type.
+    ///
+    /// Returns `None` if the move is illegal in the given [`Position`](crate::chess::position::Position).
+    fn from_action(action: Action, position: &Position) -> Option<Self>;
+
+    /// Converts this type to the internal representation of [`Actions`](self::Action).
+    ///
+    /// Returns `None` if this move is illegal in the given [`Position`](crate::chess::position::Position).
+    fn to_action(&self, position: &Position) -> Option<Action>;
+}
 
 /// Internal efficient representation of moves using a from-to \<promotion\> approach,
 /// with all relevant information stored compactly.
@@ -124,24 +140,24 @@ impl Action {
 
     /// Returns the square the move originates from.
     #[inline(always)]
-    pub(crate) const fn origin(self) -> Square {
+    pub const fn origin(self) -> Square {
         unsafe { Square::from_index_unchecked((self.0 & Self::ORIGIN_MASK) as u8) }
     }
     /// Returns the square the move targets.
     #[inline(always)]
-    pub(crate) const fn target(self) -> Square {
+    pub const fn target(self) -> Square {
         unsafe { Square::from_index_unchecked(((self.0 & Self::TARGET_MASK) >> 6) as u8) }
     }
 
     /// Checks if this move is a capture.
     #[inline(always)]
-    pub(crate) const fn is_capture(self) -> bool {
+    pub const fn is_capture(self) -> bool {
         self.0 & Self::CAPTURE != 0
     }
 
     /// Checks if this move is a promotion, and returns the promotion target if so.
     #[inline(always)]
-    pub(crate) const fn promotion_target(self) -> Option<PieceKind> {
+    pub const fn promotion_target(self) -> Option<PieceKind> {
         if self.0 & Self::PROMOTION != 0 {
             Some(unsafe {
                 std::mem::transmute::<u8, PieceKind>(
@@ -155,7 +171,7 @@ impl Action {
 
     /// Checks if this move encodes a queenside castle.
     #[inline(always)]
-    pub(crate) const fn is_queenside_castle(self) -> bool {
+    pub const fn is_queenside_castle(self) -> bool {
         self.promotion_target().is_none()
             && !self.is_capture()
             && self.special_1_is_set()
@@ -164,7 +180,7 @@ impl Action {
 
     /// Checks if this move encodes a kingside castle.
     #[inline(always)]
-    pub(crate) const fn is_kingside_castle(self) -> bool {
+    pub const fn is_kingside_castle(self) -> bool {
         self.promotion_target().is_none()
             && !self.is_capture()
             && self.special_1_is_set()
@@ -197,6 +213,23 @@ impl std::fmt::Display for Action {
         )
     }
 }
+impl ChessMove for Action {
+    fn from_action(action: Action, position: &Position) -> Option<Self> {
+        if position.is_legal(action) {
+            Some(action)
+        } else {
+            None
+        }
+    }
+
+    fn to_action(&self, position: &Position) -> Option<Action> {
+        if position.is_legal(*self) {
+            Some(*self)
+        } else {
+            None
+        }
+    }
+}
 
 /// Pure coordinate notation move, mainly used for parsing UCI commands.
 ///
@@ -204,15 +237,23 @@ impl std::fmt::Display for Action {
 /// which are then usable for making moves.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct UciMove {
-    pub from: Square,
-    pub to: Square,
+    pub origin: Square,
+    pub target: Square,
     pub promoting_to: Option<PieceKind>,
+}
+impl ChessMove for UciMove {
+    fn from_action(action: Action, position: &Position) -> Option<Self> {
+        position.decode_uci(action)
+    }
+    fn to_action(&self, position: &Position) -> Option<Action> {
+        position.encode_uci(*self)
+    }
 }
 impl From<Action> for UciMove {
     fn from(value: Action) -> Self {
         Self {
-            from: value.origin(),
-            to: value.target(),
+            origin: value.origin(),
+            target: value.target(),
             promoting_to: value.promotion_target(),
         }
     }
@@ -220,15 +261,15 @@ impl From<Action> for UciMove {
 impl From<&Action> for UciMove {
     fn from(value: &Action) -> Self {
         Self {
-            from: value.origin(),
-            to: value.target(),
+            origin: value.origin(),
+            target: value.target(),
             promoting_to: value.promotion_target(),
         }
     }
 }
 impl std::fmt::Display for UciMove {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.from, self.to)?;
+        write!(f, "{}{}", self.origin, self.target)?;
         if let Some(kind) = self.promoting_to {
             write!(f, "{kind}")?
         }
@@ -254,8 +295,8 @@ impl std::str::FromStr for UciMove {
         };
 
         Ok(Self {
-            from,
-            to,
+            origin: from,
+            target: to,
             promoting_to,
         })
     }
@@ -284,6 +325,15 @@ pub enum SanMove {
     },
     KingSideCastle,
     QueenSideCastle,
+}
+impl ChessMove for SanMove {
+    fn from_action(action: Action, position: &Position) -> Option<Self> {
+        position.decode_san(action)
+    }
+
+    fn to_action(&self, position: &Position) -> Option<Action> {
+        position.encode_san(*self)
+    }
 }
 impl std::fmt::Display for SanMove {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

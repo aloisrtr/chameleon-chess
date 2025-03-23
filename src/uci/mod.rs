@@ -25,7 +25,7 @@ use std::{
 };
 
 use crate::{
-    game::position::Position,
+    chess::position::Position,
     search::{SearchConfig, SearchHandle},
 };
 
@@ -70,7 +70,7 @@ pub fn uci_client() -> std::io::Result<()> {
                             Position::initial()
                         };
                         for m in moves {
-                            let Some(action) = position.get_action(m) else {
+                            let Some(action) = position.encode_uci(m) else {
                                 send_debug_message(
                                     &writer,
                                     format!("Illegal move in position command: {m}"),
@@ -78,7 +78,7 @@ pub fn uci_client() -> std::io::Result<()> {
                                 )?;
                                 break;
                             };
-                            position.make(action).unwrap()
+                            position.make(&action).unwrap()
                         }
                         send_debug_message(
                             &writer,

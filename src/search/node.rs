@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use crate::game::{action::Action, colour::Colour, position::Position};
+use crate::chess::{action::Action, colour::Colour, position::Position};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {

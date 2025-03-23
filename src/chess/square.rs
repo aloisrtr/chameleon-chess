@@ -36,7 +36,7 @@ impl File {
     ///
     /// # Exemple
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(File::from_index(2), Some(File::C));
     /// assert!(File::from_index(10).is_none());
     /// ```
@@ -56,7 +56,7 @@ impl File {
     ///
     /// # Exemple
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(unsafe { File::from_index_unchecked(2) }, File::C);
     /// ```
     #[inline]
@@ -141,7 +141,7 @@ impl Rank {
     ///
     /// # Exemple
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     ///
     /// assert_eq!(Rank::from_index(4), Some(Rank::Five));
     /// assert!(Rank::from_index(12).is_none());
@@ -162,7 +162,7 @@ impl Rank {
     ///
     /// # Exemple
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(unsafe { Rank::from_index_unchecked(4) },Rank::Five);
     /// ```
     #[inline]
@@ -262,7 +262,7 @@ impl Square {
     /// Instantiates a new square based on file and rank.
     /// # Example
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(Square::new(File::A, Rank::Four), Square::A4);
     /// ```
     #[inline]
@@ -276,7 +276,7 @@ impl Square {
     ///
     /// # Example
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(Square::from_index(4), Some(Square::E1));
     /// ```
     #[inline]
@@ -292,7 +292,7 @@ impl Square {
     ///
     /// # Example
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(Square::E5.as_index(), 36);
     /// ```
     #[inline]
@@ -312,7 +312,7 @@ impl Square {
     /// Returns the rank of the square.
     /// # Example
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(Square::A4.rank(), Rank::Four);
     /// ```
     #[inline]
@@ -323,7 +323,7 @@ impl Square {
     /// Returns the file of the square.
     /// # Example
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// assert_eq!(Square::A4.file(), File::A);
     /// ```
     #[inline]
@@ -337,7 +337,7 @@ impl Square {
     ///
     /// # Example
     /// ```
-    /// # use horsey::game::square::*;
+    /// # use horsey::chess::square::*;
     /// let square = Square::E1;
     /// assert_eq!(square.translate(Delta::North), Some(Square::E2));
     /// assert!(square.translate(Delta::South).is_none());
@@ -400,6 +400,9 @@ impl Square {
     pub(crate) const fn bitboard(self) -> Bitboard {
         Bitboard(1 << (self as u8))
     }
+
+    pub(crate) const DARK_SQUARES: Bitboard = Bitboard(0xaa55aa55aa55aa55);
+    pub(crate) const WHITE_SQUARES: Bitboard = Bitboard(0x55aa55aa55aa55aa);
 }
 impl std::ops::Add<Delta> for Square {
     type Output = Square;

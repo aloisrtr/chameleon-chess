@@ -14,7 +14,7 @@ use node::{Node, Value};
 use worker::MctsWorker;
 
 use crate::{
-    game::{
+    chess::{
         action::{Action, UciMove},
         position::Position,
     },
