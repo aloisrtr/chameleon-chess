@@ -25,18 +25,24 @@ use thiserror::Error;
 // TODO: Better FEN parsing error reports.
 /// FEN parsing errors with context.
 pub enum FenError {
+    /// A section contained an unexpected character.
     #[error("Unexpected character at index {index}: {val}")]
     UnexpectedToken { index: usize, val: char },
+    /// A necessary section of the FEN string was missing.
     #[error("FEN string missing the {0} section")]
     Incomplete(&'static str),
+    /// A non-ASCII character was found.
     #[error("Found a non-ASCII character")]
     NonAscii,
-    #[error("Failed to parse")]
-    ParseError,
+    /// The piece section of the FEN string did not define all squares.
     #[error("Piece section only defines {0} squares out of 8")]
     IncompletePieceSection(u8),
+    /// Too many squares were defined in the FEN string.
     #[error("The piece section defines too many squares")]
     TooManySquares,
+    /// Indicates a generic parse error (fallback case).
+    #[error("Failed to parse")]
+    ParseError,
 }
 
 /// FEN string representation.
@@ -51,11 +57,30 @@ pub struct Fen {
 }
 impl Fen {
     /// Parses a FEN string.
+    /// # Example
+    /// ```
+    /// # use horsey::chess::fen::*;
+    /// # use horsey::chess::castling_rights::*;
+    /// # use horsey::chess::colour::*;
+    /// let initial_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    /// let parsed_values = Fen::parse(initial_position_fen).unwrap();
+    /// assert_eq!(parsed_values.side_to_move, Colour::White);
+    /// assert_eq!(parsed_values.castling_rights, CastlingRights::full());
+    /// ```
     pub fn parse(fen: &str) -> Result<Self, FenError> {
         fen.parse()
     }
 
     /// Returns the [`PieceKind`] and [`Colour`] of a piece on a given square if any.
+    /// # Example
+    /// ```
+    /// # use horsey::chess::fen::*;
+    /// # use horsey::chess::colour::*;
+    /// # use horsey::chess::piece::*;
+    /// # use horsey::chess::square::*;
+    /// let initial_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    /// let parsed_values = Fen::parse(initial_position_fen).unwrap();
+    /// assert_eq!(parsed_values.piece_on(Square::E2), Some(PieceKind::Pawn, Colour::White));
     pub fn piece_on(&self, square: Square) -> Option<(PieceKind, Colour)> {
         let sq_bb = square.bitboard();
 

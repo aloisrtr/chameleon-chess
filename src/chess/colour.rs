@@ -12,6 +12,13 @@ pub enum Colour {
 }
 impl Colour {
     /// Inverts the colour in place.
+    /// # Example
+    /// ```
+    /// # use horsey::chess::colour::Colour;
+    /// let mut side_to_move = Colour::White;
+    /// side_to_move.invert();
+    /// assert_eq!(side_to_move, Colour::Black);
+    /// ```
     #[inline]
     pub fn invert(&mut self) {
         *self = if self.is_black() {
@@ -22,6 +29,11 @@ impl Colour {
     }
 
     /// Returns the inverse of this colour.
+    /// # Example
+    /// ```
+    /// # use horsey::chess::colour::Colour;
+    /// assert_eq!(Colour::White.inverse(), Colour::Black);
+    /// ```
     #[inline]
     pub const fn inverse(&self) -> Self {
         if self.is_black() {

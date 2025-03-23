@@ -9,13 +9,19 @@ use super::position::Position;
 
 /// Builder pattern to configure a Perft test.
 pub struct PerftConfig {
+    /// Maximum depth to reach.
     pub depth: u8,
+    /// Whether to run perft for each level iteratively.
     pub iterative: bool,
+    /// Whether to count legal moves on horizon nodes or play them.
     pub bulk_counting: bool,
+    /// Divides perft results, showing them for each move at depth 1.
     pub divide: bool,
 
+    /// Enables benchmarking time and nodes-per-second.
     pub bench: bool,
 
+    /// ASCII print of the board.
     pub show_board: bool,
 }
 impl PerftConfig {

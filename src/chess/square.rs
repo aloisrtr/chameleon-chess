@@ -65,6 +65,11 @@ impl File {
     }
 
     /// The index of this file.
+    /// # Exemple
+    /// ```
+    /// # use horsey::chess::square::*;
+    /// assert_eq!(File::C.as_index(), 2);
+    /// ```
     pub fn as_index(self) -> u8 {
         self as u8
     }
@@ -160,7 +165,7 @@ impl Rank {
     /// # Safety
     /// If the index is more than 7, results in undefined behavior.
     ///
-    /// # Exemple
+    /// # Example
     /// ```
     /// # use horsey::chess::square::*;
     /// assert_eq!(unsafe { Rank::from_index_unchecked(4) },Rank::Five);
@@ -171,6 +176,11 @@ impl Rank {
     }
 
     /// The index of this rank.
+    /// # Example
+    /// ```
+    /// # use horsey::chess::square::*;
+    /// assert_eq!(Rank::Five.as_index(), 4);
+    /// ```
     pub fn as_index(self) -> u8 {
         self as u8
     }
@@ -259,6 +269,21 @@ pub enum Square {
     H8,
 }
 impl Square {
+    pub(crate) const DARK_SQUARES: Bitboard = Bitboard(0xaa55aa55aa55aa55);
+    #[allow(dead_code)]
+    pub(crate) const WHITE_SQUARES: Bitboard = Bitboard(0x55aa55aa55aa55aa);
+
+    /// Array containing all squares in little-endian rank mapping.
+    pub const SQUARES: [Square; 64] = {
+        let mut squares = [Square::A1; 64];
+        let mut i = 0;
+        while i < 64 {
+            squares[i] = unsafe { Square::from_index_unchecked(i as u8) };
+            i += 1;
+        }
+        squares
+    };
+
     /// Instantiates a new square based on file and rank.
     /// # Example
     /// ```
@@ -380,7 +405,7 @@ impl Square {
 
     /// An iterator over all squares, ordered from A1 to H8.
     pub fn squares_iter() -> impl Iterator<Item = Self> {
-        (0..64).map(|i| unsafe { Square::from_index_unchecked(i) })
+        Square::SQUARES.into_iter()
     }
 
     /// An iterator over all square, ordered in big-endian rank/little-endian file
@@ -400,9 +425,6 @@ impl Square {
     pub(crate) const fn bitboard(self) -> Bitboard {
         Bitboard(1 << (self as u8))
     }
-
-    pub(crate) const DARK_SQUARES: Bitboard = Bitboard(0xaa55aa55aa55aa55);
-    pub(crate) const WHITE_SQUARES: Bitboard = Bitboard(0x55aa55aa55aa55aa);
 }
 impl std::ops::Add<Delta> for Square {
     type Output = Square;

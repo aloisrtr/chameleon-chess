@@ -34,16 +34,24 @@ pub enum PlaceError {
 
 /// Possible result of the game.
 pub enum GameResult {
+    /// A side is in checkmate. The value in this variant indicates which side **is in checkmate**,
+    /// not the side that won.
     Checkmate(Colour),
+    /// A draw was reached. The value in this variant indicates the type of draw.
     Draw(DrawKind),
 }
 
 /// All possible kinds of draw.
 pub enum DrawKind {
+    /// One side has no legal moves, yet is not in check.
     Stalemate,
+    /// The same position was repeated three times.
     Repetition,
+    /// Fifty plys have been played without any capture or pawn pushes.
     FiftyMoveRule,
+    /// None of the players can force checkmate.
     InsufficientMaterial,
+    /// Both players agreed to a draw.
     Agreement,
 }
 
@@ -1322,6 +1330,26 @@ impl Position {
 impl std::hash::Hash for Position {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash.hash(state)
+    }
+}
+impl From<Fen> for Position {
+    fn from(value: Fen) -> Self {
+        Self::from_fen(&value)
+    }
+}
+impl From<&Fen> for Position {
+    fn from(value: &Fen) -> Self {
+        Self::from_fen(value)
+    }
+}
+impl Into<Fen> for Position {
+    fn into(self) -> Fen {
+        self.fen()
+    }
+}
+impl Into<Fen> for &Position {
+    fn into(self) -> Fen {
+        self.fen()
     }
 }
 impl std::fmt::Debug for Position {

@@ -10,17 +10,17 @@ use super::{
 };
 
 /// Generic trait for types that can act as chess moves. This trait includes conversions
-/// from and to the internal [`Action`] representation using a [`Position`](crate::chess::position::Position)
+/// from and to the internal [`Action`] representation using a [`Position`]
 /// object for added context, and can be used as input to [`Position::make`](crate::chess::position::Position::make).
 pub trait ChessMove: Sized {
     /// Converts an internal representation of [`Actions`](self::Action) to this type.
     ///
-    /// Returns `None` if the move is illegal in the given [`Position`](crate::chess::position::Position).
+    /// Returns `None` if the move is illegal in the given [`Position`].
     fn from_action(action: Action, position: &Position) -> Option<Self>;
 
     /// Converts this type to the internal representation of [`Actions`](self::Action).
     ///
-    /// Returns `None` if this move is illegal in the given [`Position`](crate::chess::position::Position).
+    /// Returns `None` if this move is illegal in the given [`Position`].
     fn to_action(&self, position: &Position) -> Option<Action>;
 }
 
@@ -233,7 +233,7 @@ impl ChessMove for Action {
 
 /// Pure coordinate notation move, mainly used for parsing UCI commands.
 ///
-/// These can be passed to a [`Position`](crate::game::position::Position) to convert them into [`Action`],
+/// These can be passed to a [`Position`] to convert them into [`Action`],
 /// which are then usable for making moves.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct UciMove {
@@ -307,7 +307,7 @@ impl std::str::FromStr for UciMove {
 ///
 /// SAN encoded moves include/lack context that is ommitted/required by other move representations,
 /// and therefore cannot be directly converted to/obtained from [`Action`] or [`UciMove`] types.
-/// Refer to [`Position::encode_san`](crate::game::position::Position::encode_san) and [`Position::decode_san`](crate::game::position::Position::decode_san) for conversions.
+/// Refer to [`Position::encode_san`] and [`Position::decode_san`] for conversions.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SanMove {
     PawnMove {
