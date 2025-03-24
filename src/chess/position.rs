@@ -147,7 +147,7 @@ impl Position {
     pub fn from_fen(fen: &Fen) -> Self {
         let mut pieces = [None; 64];
         for sq in Square::squares_fen_iter() {
-            pieces[sq as usize] = fen.piece_on(sq).map(|(k, _)| k);
+            pieces[sq as usize] = fen.piece_on(sq).map(|p| p.kind);
         }
 
         let mut pos = Self {
@@ -299,12 +299,18 @@ impl Position {
         } else if action.is_queenside_castle() {
             Some(SanMove::QueenSideCastle)
         } else if moving_piece == PieceKind::Pawn {
-            Some(SanMove::PawnMove {
-                origin_file: action.origin().file(),
-                is_capture: action.is_capture(),
-                target: action.target(),
-                promoting_to: action.promotion_target(),
-            })
+            if action.is_capture() {
+                Some(SanMove::PawnCapture {
+                    origin_file: action.origin().file(),
+                    target: action.target(),
+                    promoting_to: action.promotion_target(),
+                })
+            } else {
+                Some(SanMove::PawnPush {
+                    target: action.target(),
+                    promoting_to: action.promotion_target(),
+                })
+            }
         } else {
             let candidates: Vec<_> = self
                 .actions()

@@ -1,5 +1,11 @@
 //! Enumerations of chessboard accessing constants, such as files, ranks and squares.
+use thiserror::Error;
+
 use super::bitboard::Bitboard;
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+#[error("Does not denote a valid file")]
+pub struct FileParseError;
 
 /// Files of a chessboard (A-H).
 #[repr(u8)]
@@ -93,8 +99,7 @@ impl std::fmt::Display for File {
     }
 }
 impl std::str::FromStr for File {
-    // TODO: better errors
-    type Err = ();
+    type Err = FileParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.to_ascii_lowercase().as_str() {
@@ -106,10 +111,14 @@ impl std::str::FromStr for File {
             "f" => Self::F,
             "g" => Self::G,
             "h" => Self::H,
-            _ => Err(())?,
+            _ => Err(FileParseError)?,
         })
     }
 }
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+#[error("Does not denote a valid rank")]
+pub struct RankParseError;
 
 /// Ranks of a chessboard (1-8).
 #[repr(u8)]
@@ -191,11 +200,11 @@ impl std::fmt::Display for Rank {
     }
 }
 impl std::str::FromStr for Rank {
-    // TODO: better errors
-    type Err = ();
+    type Err = RankParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_index(s.parse::<u8>().map_err(|_| ())? - 1).ok_or(())
+        let index = s.parse::<u8>().map_err(|_| RankParseError)? - 1;
+        Self::from_index(index).ok_or(RankParseError)
     }
 }
 
@@ -455,16 +464,33 @@ impl std::fmt::Display for Square {
         write!(f, "{}{}", self.file(), self.rank())
     }
 }
+
+#[derive(Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Debug, Error)]
+pub enum SquareParseError {
+    #[error("Too many characters to denote a valid square")]
+    TooManyChars,
+    #[error("The first character does not denote a valid file")]
+    InvalidFile,
+    #[error("The second character does not denote a valid rank")]
+    InvalidRank,
+}
+
 impl std::str::FromStr for Square {
-    // TODO: better error
-    type Err = ();
+    type Err = SquareParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let chars = s.chars().map(|c| c.to_string()).collect::<Vec<_>>();
         if chars.len() != 2 {
-            return Err(());
+            return Err(SquareParseError::TooManyChars);
         }
-        Ok(Self::new(chars[0].parse()?, chars[1].parse()?))
+        Ok(Self::new(
+            chars[0]
+                .parse()
+                .map_err(|_| SquareParseError::InvalidFile)?,
+            chars[1]
+                .parse()
+                .map_err(|_| SquareParseError::InvalidRank)?,
+        ))
     }
 }
 

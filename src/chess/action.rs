@@ -2,9 +2,11 @@
 //! Contains multiple move representations (internal, UCI and SAN) complete with
 //! methods for formatting, converting and parsing such representations.
 
+use thiserror::Error;
+
 use super::{
     colour::Colour,
-    piece::PieceKind,
+    piece::{Piece, PieceKind},
     position::Position,
     square::{File, Rank, Square},
 };
@@ -276,19 +278,47 @@ impl std::fmt::Display for UciMove {
         Ok(())
     }
 }
+
+/// Errors that may arise when parsing UCI moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Error)]
+pub enum UciParseError {
+    #[error("Invalid origin square")]
+    InvalidOriginSquare,
+    #[error("Invalid target square")]
+    InvalidTargetSquare,
+    #[error("Cannot promote to {0:?}")]
+    InvalidPromotion(Option<PieceKind>),
+    #[error("UCI moves are at least 4 characters, got {0}")]
+    TooLittleChars(usize),
+    #[error("UCI moves are at most 5 characters, got {0}")]
+    TooManyChars(usize),
+}
+
 impl std::str::FromStr for UciMove {
-    // TODO: Parsing errors
-    type Err = ();
+    type Err = UciParseError;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let from = s[0..2].parse().unwrap();
-        let to = s[2..4].parse().unwrap();
+        if s.len() < 4 {
+            return Err(UciParseError::TooLittleChars(s.len()));
+        } else if s.len() > 5 {
+            return Err(UciParseError::TooManyChars(s.len()));
+        }
+
+        let from = s[0..2]
+            .parse()
+            .map_err(|_| UciParseError::InvalidOriginSquare)?;
+        let to = s[2..4]
+            .parse()
+            .map_err(|_| UciParseError::InvalidTargetSquare)?;
         let promoting_to = if s.len() == 5 {
-            match &s[4..5] {
-                "n" => Some(PieceKind::Knight),
-                "b" => Some(PieceKind::Bishop),
-                "r" => Some(PieceKind::Rook),
-                "q" => Some(PieceKind::Queen),
-                _ => None,
+            if let Ok(piece) = s[4..5].parse::<Piece>() {
+                if piece.kind.is_valid_promotion_target() {
+                    Some(piece.kind)
+                } else {
+                    Err(UciParseError::InvalidPromotion(Some(piece.kind)))?
+                }
+            } else {
+                Err(UciParseError::InvalidPromotion(None))?
             }
         } else {
             None
@@ -310,9 +340,12 @@ impl std::str::FromStr for UciMove {
 /// Refer to [`Position::encode_san`] and [`Position::decode_san`] for conversions.
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SanMove {
-    PawnMove {
+    PawnPush {
+        target: Square,
+        promoting_to: Option<PieceKind>,
+    },
+    PawnCapture {
         origin_file: File,
-        is_capture: bool,
         target: Square,
         promoting_to: Option<PieceKind>,
     },
@@ -338,16 +371,22 @@ impl ChessMove for SanMove {
 impl std::fmt::Display for SanMove {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            Self::PawnMove {
-                origin_file,
-                is_capture,
+            Self::PawnPush {
                 target,
                 promoting_to,
             } => {
-                if is_capture {
-                    write!(f, "{origin_file}x")?
-                }
                 write!(f, "{target}")?;
+                if let Some(kind) = promoting_to {
+                    write!(f, "{kind}")?
+                }
+                Ok(())
+            }
+            Self::PawnCapture {
+                origin_file,
+                target,
+                promoting_to,
+            } => {
+                write!(f, "{origin_file}x{target}")?;
                 if let Some(kind) = promoting_to {
                     write!(f, "{kind}")?
                 }
@@ -377,11 +416,479 @@ impl std::fmt::Display for SanMove {
         }
     }
 }
-impl std::str::FromStr for SanMove {
-    // TODO: parsing errors
-    type Err = ();
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        todo!("SAN parsing is not yet implemented")
+/// Errors that may arise when parsing SAN moves.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+pub enum SanParseError {
+    #[error("Missing target square")]
+    MissingTargetSquare,
+    #[error("Invalid target square")]
+    InvalidTargetSquare,
+    #[error("First character is invalid for SAN moves")]
+    InvalidFirstCharacter,
+    #[error("Cannot promote to {0:?}")]
+    InvalidPromotion(Option<PieceKind>),
+    #[error("{0} characters left unconsumed after successful SAN parse")]
+    UnconsumedChars(usize),
+    #[error("SAN moves are at least 2 characters, got {0}")]
+    TooLittleChars(usize),
+    #[error("SAN moves are at most 6 characters, got {0}")]
+    TooManyChars(usize),
+}
+
+impl std::str::FromStr for SanMove {
+    type Err = SanParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() < 2 {
+            return Err(SanParseError::TooLittleChars(s.len()));
+        } else if s.len() > 6 {
+            return Err(SanParseError::TooManyChars(s.len()));
+        }
+
+        if let Ok(piece) = s[0..1].parse::<Piece>() {
+            // Piece move parsing
+            let (mut file, mut rank, mut next_index) = if let Ok(file) = s[1..2].parse::<File>() {
+                if let Ok(rank) = s[2..3].parse::<Rank>() {
+                    (Some(file), Some(rank), 3)
+                } else {
+                    (Some(file), None, 2)
+                }
+            } else if let Ok(rank) = s[1..2].parse::<Rank>() {
+                (None, Some(rank), 2)
+            } else {
+                (None, None, 1)
+            };
+
+            let (target, is_capture) = if s.len() >= next_index + 3 {
+                if &s[next_index..next_index + 1] != "x" {
+                    return Err(SanParseError::UnconsumedChars(1));
+                }
+                let target = s[next_index + 1..next_index + 3]
+                    .parse::<Square>()
+                    .map_err(|_| SanParseError::InvalidTargetSquare)?;
+                next_index += 3;
+                (target, true)
+            } else if s.len() >= next_index + 2 {
+                let target = s[next_index..next_index + 2]
+                    .parse::<Square>()
+                    .map_err(|_| SanParseError::InvalidTargetSquare)?;
+                next_index += 2;
+                (target, false)
+            } else {
+                let target = Square::new(
+                    file.ok_or(SanParseError::InvalidTargetSquare)?,
+                    rank.ok_or(SanParseError::InvalidTargetSquare)?,
+                );
+                file = None;
+                rank = None;
+                (target, false)
+            };
+
+            if s.len() > next_index {
+                return Err(SanParseError::UnconsumedChars(s.len() - next_index));
+            }
+
+            Ok(Self::PieceMove {
+                moving_piece: piece.kind,
+                origin_file: file,
+                origin_rank: rank,
+                is_capture,
+                target,
+            })
+        } else if let Ok(file) = s[0..1].parse::<File>() {
+            // Pawn move parsing
+            if let Ok(rank) = s[1..2].parse::<Rank>() {
+                let promoting_to = if s.len() == 3 {
+                    let promotion = s[2..3]
+                        .parse::<Piece>()
+                        .map_err(|_| SanParseError::InvalidPromotion(None))?
+                        .kind;
+                    if !promotion.is_valid_promotion_target() {
+                        return Err(SanParseError::InvalidPromotion(Some(promotion)));
+                    }
+                    Some(promotion)
+                } else if s.len() > 3 {
+                    return Err(SanParseError::UnconsumedChars(s.len() - 3));
+                } else {
+                    None
+                };
+
+                Ok(Self::PawnPush {
+                    target: Square::new(file, rank),
+                    promoting_to,
+                })
+            } else if &s[1..2] == "x" {
+                // Pawn capture
+                if s.len() < 4 {
+                    // We can't have enough characters to parse the target square.
+                    return Err(SanParseError::MissingTargetSquare);
+                }
+                let target = s[2..4]
+                    .parse::<Square>()
+                    .map_err(|_| SanParseError::InvalidTargetSquare)?;
+                let promoting_to = if s.len() == 5 {
+                    let promotion = s[4..5]
+                        .parse::<Piece>()
+                        .map_err(|_| SanParseError::InvalidPromotion(None))?
+                        .kind;
+
+                    if !promotion.is_valid_promotion_target() {
+                        return Err(SanParseError::InvalidPromotion(Some(promotion)));
+                    }
+                    Some(promotion)
+                } else if s.len() > 5 {
+                    return Err(SanParseError::UnconsumedChars(s.len() - 5));
+                } else {
+                    None
+                };
+
+                Ok(Self::PawnCapture {
+                    origin_file: file,
+                    target,
+                    promoting_to,
+                })
+            } else {
+                // Invalid pawn move or capture
+                Err(SanParseError::MissingTargetSquare)
+            }
+        } else if s == "O-O" {
+            Ok(Self::KingSideCastle)
+        } else if s == "O-O-O" {
+            Ok(Self::QueenSideCastle)
+        } else {
+            // Invalid first character, we cannot detect what type of move this
+            // was supposed to encode.
+            Err(SanParseError::InvalidFirstCharacter)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uci_parse() {
+        assert_eq!(
+            "e4e5".parse(),
+            Ok(UciMove {
+                origin: Square::E4,
+                target: Square::E5,
+                promoting_to: None
+            })
+        );
+    }
+
+    #[test]
+    fn uci_parse_promotion() {
+        assert_eq!(
+            "e4e5b".parse(),
+            Ok(UciMove {
+                origin: Square::E4,
+                target: Square::E5,
+                promoting_to: Some(PieceKind::Bishop)
+            })
+        );
+    }
+
+    #[test]
+    fn uci_parse_invalid_origin() {
+        assert_eq!(
+            "l3e5".parse::<UciMove>(),
+            Err(UciParseError::InvalidOriginSquare)
+        );
+    }
+
+    #[test]
+    fn uci_parse_invalid_target() {
+        assert_eq!(
+            "e3i6".parse::<UciMove>(),
+            Err(UciParseError::InvalidTargetSquare)
+        );
+    }
+
+    #[test]
+    fn uci_parse_invalid_promotion() {
+        assert_eq!(
+            "e4e5p".parse::<UciMove>(),
+            Err(UciParseError::InvalidPromotion(Some(PieceKind::Pawn)))
+        );
+        assert_eq!(
+            "e4e5l".parse::<UciMove>(),
+            Err(UciParseError::InvalidPromotion(None))
+        );
+    }
+
+    #[test]
+    fn uci_parse_too_small() {
+        assert_eq!(
+            "e4e".parse::<UciMove>(),
+            Err(UciParseError::TooLittleChars(3))
+        );
+    }
+
+    #[test]
+    fn uci_parse_too_long() {
+        assert_eq!(
+            "e4e5bk".parse::<UciMove>(),
+            Err(UciParseError::TooManyChars(6))
+        );
+    }
+
+    #[test]
+    fn san_castling() {
+        assert_eq!("O-O".parse(), Ok(SanMove::KingSideCastle));
+        assert_eq!("O-O-O".parse(), Ok(SanMove::QueenSideCastle));
+    }
+
+    #[test]
+    fn san_pawn_push() {
+        assert_eq!(
+            "e4".parse(),
+            Ok(SanMove::PawnPush {
+                target: Square::E4,
+                promoting_to: None
+            })
+        );
+    }
+
+    #[test]
+    fn san_pawn_push_promotion() {
+        assert_eq!(
+            "e8b".parse(),
+            Ok(SanMove::PawnPush {
+                target: Square::E8,
+                promoting_to: Some(PieceKind::Bishop)
+            })
+        );
+    }
+
+    #[test]
+    fn san_pawn_push_invalid_promotion() {
+        assert_eq!(
+            "e4p".parse::<SanMove>(),
+            Err(SanParseError::InvalidPromotion(Some(PieceKind::Pawn)))
+        );
+        assert_eq!(
+            "e4l".parse::<SanMove>(),
+            Err(SanParseError::InvalidPromotion(None))
+        );
+    }
+
+    #[test]
+    fn san_pawn_push_unconsumed_chars() {
+        assert_eq!(
+            "f7bl".parse::<SanMove>(),
+            Err(SanParseError::UnconsumedChars(1))
+        );
+    }
+
+    #[test]
+    fn san_pawn_capture() {
+        assert_eq!(
+            "exd6".parse(),
+            Ok(SanMove::PawnCapture {
+                origin_file: File::E,
+                target: Square::D6,
+                promoting_to: None
+            })
+        )
+    }
+
+    #[test]
+    fn san_pawn_capture_invalid_file() {
+        assert_eq!(
+            "lxe4".parse::<SanMove>(),
+            Err(SanParseError::InvalidFirstCharacter)
+        )
+    }
+
+    #[test]
+    fn san_pawn_capture_invalid_target() {
+        assert_eq!(
+            "exle".parse::<SanMove>(),
+            Err(SanParseError::InvalidTargetSquare)
+        )
+    }
+
+    #[test]
+    fn san_pawn_capture_promotion() {
+        assert_eq!(
+            "exf7n".parse::<SanMove>(),
+            Ok(SanMove::PawnCapture {
+                origin_file: File::E,
+                target: Square::F7,
+                promoting_to: Some(PieceKind::Knight)
+            })
+        )
+    }
+
+    #[test]
+    fn san_pawn_capture_invalid_promotion() {
+        assert_eq!(
+            "exf7p".parse::<SanMove>(),
+            Err(SanParseError::InvalidPromotion(Some(PieceKind::Pawn)))
+        );
+        assert_eq!(
+            "exf7l".parse::<SanMove>(),
+            Err(SanParseError::InvalidPromotion(None))
+        );
+    }
+
+    #[test]
+    fn san_pawn_capture_unconsumed_chars() {
+        assert_eq!(
+            "exf7bl".parse::<SanMove>(),
+            Err(SanParseError::UnconsumedChars(1))
+        );
+    }
+
+    #[test]
+    fn san_piece_move_unambiguous() {
+        assert_eq!(
+            "Nf7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Knight,
+                origin_file: None,
+                origin_rank: None,
+                is_capture: false,
+                target: Square::F7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_move_file_ambiguity() {
+        assert_eq!(
+            "bec7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Bishop,
+                origin_file: Some(File::E),
+                origin_rank: None,
+                is_capture: false,
+                target: Square::C7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_move_rank_ambiguity() {
+        assert_eq!(
+            "Q7b7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Queen,
+                origin_rank: Some(Rank::Seven),
+                origin_file: None,
+                is_capture: false,
+                target: Square::B7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_move_rank_and_file_ambiguity() {
+        assert_eq!(
+            "Re7b7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Rook,
+                origin_rank: Some(Rank::Seven),
+                origin_file: Some(File::E),
+                is_capture: false,
+                target: Square::B7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_capture() {
+        assert_eq!(
+            "Rxb7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Rook,
+                origin_rank: None,
+                origin_file: None,
+                is_capture: true,
+                target: Square::B7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_capture_file_ambiguity() {
+        assert_eq!(
+            "bexc7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Bishop,
+                origin_file: Some(File::E),
+                origin_rank: None,
+                is_capture: true,
+                target: Square::C7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_capture_rank_ambiguity() {
+        assert_eq!(
+            "Q7xb7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Queen,
+                origin_rank: Some(Rank::Seven),
+                origin_file: None,
+                is_capture: true,
+                target: Square::B7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_capture_rank_and_file_ambiguity() {
+        assert_eq!(
+            "Re7xb7".parse::<SanMove>(),
+            Ok(SanMove::PieceMove {
+                moving_piece: PieceKind::Rook,
+                origin_rank: Some(Rank::Seven),
+                origin_file: Some(File::E),
+                is_capture: true,
+                target: Square::B7
+            })
+        );
+    }
+
+    #[test]
+    fn san_piece_move_unconsumated_chars() {
+        assert_eq!(
+            "Re7l".parse::<SanMove>(),
+            Err(SanParseError::UnconsumedChars(1))
+        );
+        assert_eq!(
+            "Rbe7l".parse::<SanMove>(),
+            Err(SanParseError::UnconsumedChars(1))
+        );
+        assert_eq!(
+            "Rb5e7l".parse::<SanMove>(),
+            Err(SanParseError::UnconsumedChars(1))
+        );
+        assert_eq!(
+            "Rxe7l".parse::<SanMove>(),
+            Err(SanParseError::UnconsumedChars(1))
+        );
+        assert_eq!(
+            "Rbxe7l".parse::<SanMove>(),
+            Err(SanParseError::UnconsumedChars(1))
+        );
+        assert_eq!(
+            "Rb5xe7l".parse::<SanMove>(),
+            Err(SanParseError::TooManyChars(7))
+        );
+    }
+
+    #[test]
+    fn san_invalid_first_char() {
+        assert_eq!(
+            "oe7l".parse::<SanMove>(),
+            Err(SanParseError::InvalidFirstCharacter)
+        );
     }
 }

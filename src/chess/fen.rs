@@ -13,7 +13,7 @@ use super::{
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::{Colour, NUM_COLOURS},
-    piece::{PieceKind, NUM_PIECES},
+    piece::{Piece, PieceKind, NUM_PIECES},
     square::Square,
 };
 
@@ -80,17 +80,18 @@ impl Fen {
     /// # use horsey::chess::square::*;
     /// let initial_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     /// let parsed_values = Fen::parse(initial_position_fen).unwrap();
-    /// assert_eq!(parsed_values.piece_on(Square::E2), Some(PieceKind::Pawn, Colour::White));
-    pub fn piece_on(&self, square: Square) -> Option<(PieceKind, Colour)> {
+    /// assert_eq!(parsed_values.piece_on(Square::E2), Some(Piece { kind: PieceKind::Pawn, colour: Colour::White }));
+    pub fn piece_on(&self, square: Square) -> Option<Piece> {
         let sq_bb = square.bitboard();
 
         for kind in PieceKind::iter() {
             if self.bitboards[kind as usize + 2].intersects(sq_bb) {
-                if self.bitboards[Colour::White as usize].intersects(sq_bb) {
-                    return Some((kind, Colour::White));
-                } else {
-                    return Some((kind, Colour::Black));
-                }
+                return Some(Piece {
+                    kind,
+                    colour: self.bitboards[Colour::Black as usize]
+                        .intersects(sq_bb)
+                        .into(),
+                });
             }
         }
 
@@ -321,23 +322,11 @@ impl std::fmt::Debug for Fen {
         let mut skip = 0;
         let mut line_length = 0;
         for sq in Square::squares_fen_iter() {
-            if let Some((piece, colour)) = self.piece_on(sq) {
+            if let Some(p) = self.piece_on(sq) {
                 if skip != 0 {
                     write!(f, "{skip}")?;
                     skip = 0
                 }
-                let mut p = match piece {
-                    PieceKind::Pawn => 'p',
-                    PieceKind::Knight => 'n',
-                    PieceKind::Bishop => 'b',
-                    PieceKind::Rook => 'r',
-                    PieceKind::Queen => 'q',
-                    PieceKind::King => 'k',
-                };
-                if colour == Colour::White {
-                    p = p.to_ascii_uppercase();
-                }
-
                 write!(f, "{p}")?;
             } else {
                 skip += 1
