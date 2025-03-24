@@ -286,7 +286,85 @@ impl Position {
     ///
     /// Returns `None` if the move was illegal in the current position.
     pub fn encode_san(&self, san: SanMove) -> Option<Action> {
-        todo!("Conversion SAN -> Action not yet implemented")
+        let (origins, target, is_capture, promotion) = match san {
+            SanMove::PawnPush {
+                target,
+                promoting_to,
+            } => {
+                let double_push_rank = if self.side_to_move.is_white() {
+                    Rank::Four
+                } else {
+                    Rank::Five
+                };
+                let mut origins = vec![if self.side_to_move.is_white() {
+                    target + Delta::South
+                } else {
+                    target + Delta::North
+                }];
+                if target.rank() == double_push_rank {
+                    origins.push(if self.side_to_move.is_white() {
+                        target + Delta::South + Delta::South
+                    } else {
+                        target + Delta::North + Delta::North
+                    })
+                }
+                (origins, target, false, promoting_to)
+            }
+            SanMove::PawnCapture {
+                origin_file,
+                target,
+                promoting_to,
+            } => {
+                let origin = if self.side_to_move.is_white() {
+                    Square::new(origin_file, target.rank() + Delta::South)
+                } else {
+                    Square::new(origin_file, target.rank() + Delta::North)
+                };
+                (vec![origin], target, true, promoting_to)
+            }
+            SanMove::PieceMove {
+                moving_piece,
+                origin_file,
+                origin_rank,
+                is_capture,
+                target,
+            } => {
+                let piece_bb = self.piece_bitboard(moving_piece);
+                let colour_bb = self.color_bitboard(self.side_to_move);
+                let mut origins_bb = Bitboard::universe();
+                if let Some(origin_file) = origin_file {
+                    origins_bb &= origin_file.bitboard()
+                }
+                if let Some(origin_rank) = origin_rank {
+                    origins_bb &= origin_rank.bitboard()
+                }
+                origins_bb &= piece_bb & colour_bb;
+                (origins_bb.collect(), target, is_capture, None)
+            }
+            SanMove::KingSideCastle => {
+                if self.side_to_move().is_white() {
+                    (vec![Square::E1], Square::G1, false, None)
+                } else {
+                    (vec![Square::E8], Square::G8, false, None)
+                }
+            }
+            SanMove::QueenSideCastle => {
+                if self.side_to_move().is_white() {
+                    (vec![Square::E1], Square::C1, false, None)
+                } else {
+                    (vec![Square::E8], Square::C8, false, None)
+                }
+            }
+        };
+        self.actions()
+            .iter()
+            .find(|a| {
+                a.target() == target
+                    && a.is_capture() == is_capture
+                    && a.promotion_target() == promotion
+                    && origins.contains(&a.origin())
+            })
+            .copied()
     }
 
     /// Tries to convert an [`Action`] into a [`SanMove`].

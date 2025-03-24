@@ -80,7 +80,7 @@ impl Fen {
     /// # use horsey::chess::square::*;
     /// let initial_position_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     /// let parsed_values = Fen::parse(initial_position_fen).unwrap();
-    /// assert_eq!(parsed_values.piece_on(Square::E2), Some(Piece { kind: PieceKind::Pawn, colour: Colour::White }));
+    /// assert_eq!(parsed_values.piece_on(Square::E2), Some(Piece::new(PieceKind::Pawn, Colour::White)));
     pub fn piece_on(&self, square: Square) -> Option<Piece> {
         let sq_bb = square.bitboard();
 

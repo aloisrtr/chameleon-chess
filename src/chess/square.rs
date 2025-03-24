@@ -80,6 +80,32 @@ impl File {
         self as u8
     }
 }
+impl std::ops::Add<Delta> for File {
+    type Output = File;
+
+    fn add(self, rhs: Delta) -> Self::Output {
+        let delta_file = (rhs as i8).rem_euclid(8);
+        unsafe { std::mem::transmute((self as u8).wrapping_add_signed(delta_file)) }
+    }
+}
+impl std::ops::AddAssign<Delta> for File {
+    fn add_assign(&mut self, rhs: Delta) {
+        *self = *self + rhs
+    }
+}
+impl std::ops::Sub<Delta> for File {
+    type Output = File;
+
+    fn sub(self, rhs: Delta) -> Self::Output {
+        let delta_file = (rhs as i8).rem_euclid(8);
+        unsafe { std::mem::transmute((self as u8).wrapping_add_signed(-delta_file)) }
+    }
+}
+impl std::ops::SubAssign<Delta> for File {
+    fn sub_assign(&mut self, rhs: Delta) {
+        *self = *self - rhs
+    }
+}
 impl std::fmt::Display for File {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -192,6 +218,32 @@ impl Rank {
     /// ```
     pub fn as_index(self) -> u8 {
         self as u8
+    }
+}
+impl std::ops::Add<Delta> for Rank {
+    type Output = Rank;
+
+    fn add(self, rhs: Delta) -> Self::Output {
+        let delta_rank = (rhs as i8) / 8;
+        unsafe { std::mem::transmute((self as u8).wrapping_add_signed(delta_rank)) }
+    }
+}
+impl std::ops::AddAssign<Delta> for Rank {
+    fn add_assign(&mut self, rhs: Delta) {
+        *self = *self + rhs
+    }
+}
+impl std::ops::Sub<Delta> for Rank {
+    type Output = Rank;
+
+    fn sub(self, rhs: Delta) -> Self::Output {
+        let delta_rank = (rhs as i8) / 8;
+        unsafe { std::mem::transmute((self as u8).wrapping_add_signed(-delta_rank)) }
+    }
+}
+impl std::ops::SubAssign<Delta> for Rank {
+    fn sub_assign(&mut self, rhs: Delta) {
+        *self = *self - rhs
     }
 }
 impl std::fmt::Display for Rank {

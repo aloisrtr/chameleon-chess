@@ -10,12 +10,42 @@ use super::colour::Colour;
 pub const NUM_PIECES: usize = 6;
 
 const PIECE_SYMBOLS: [char; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'];
+const PIECE_SYMBOLS_UNICODE: [char; 12] =
+    ['♙', '♘', '♗', '♖', '♕', '♔', '♟', '♞', '♝', '♜', '♛', '♚'];
 
 /// Complete set of information for identifying a piece.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Piece {
     pub kind: PieceKind,
     pub colour: Colour,
+}
+impl Piece {
+    /// Creates a new `kind` piece of the given `colour`.
+    pub fn new(kind: PieceKind, colour: Colour) -> Self {
+        Self { kind, colour }
+    }
+
+    /// Returns the piece's symbol.
+    /// # Example
+    /// ```
+    /// # use horsey::chess::piece::*;
+    /// # use horsey::chess::colour::*;
+    /// assert_eq!(Piece::new(PieceKind::Pawn, Colour::Black).symbol(), 'p');
+    /// ```
+    pub fn symbol(&self) -> char {
+        PIECE_SYMBOLS[self.colour as usize * 6 + self.kind as usize]
+    }
+
+    /// Returns the piece's Unicode symbol.
+    /// # Example
+    /// ```
+    /// # use horsey::chess::piece::*;
+    /// # use horsey::chess::colour::*;
+    /// assert_eq!(Piece::new(PieceKind::Rook, Colour::Black).unicode_symbol(), '♜');
+    /// ```
+    pub fn unicode_symbol(&self) -> char {
+        PIECE_SYMBOLS_UNICODE[self.colour as usize * 6 + self.kind as usize]
+    }
 }
 impl std::fmt::Display for Piece {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

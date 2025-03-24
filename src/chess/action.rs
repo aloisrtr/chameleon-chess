@@ -69,6 +69,7 @@ impl Action {
     }
 
     /// Returns a new promoting move.
+    #[allow(dead_code)]
     pub(crate) const fn new_promotion(
         origin: Square,
         target: Square,
@@ -95,6 +96,7 @@ impl Action {
     }
 
     /// Returns a new promoting move with capture.
+    #[allow(dead_code)]
     pub(crate) const fn new_promotion_capture(
         origin: Square,
         target: Square,
