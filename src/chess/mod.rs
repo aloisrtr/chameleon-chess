@@ -18,3 +18,4 @@ pub mod square;
 mod zobrist;
 
 pub mod fen;
+pub mod pgn;
