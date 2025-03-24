@@ -1,6 +1,13 @@
 //! # Representation, parsing and formatting of chess actions (moves).
 //! Contains multiple move representations (internal, UCI and SAN) complete with
 //! methods for formatting, converting and parsing such representations.
+//!
+//! Note that parsing implementations do not check for the legality of parsed moves,
+//! only their grammatical correctness. Moves such as "Ke7xb2" will be parsed
+//! successfully, even though they are illegal.
+//!
+//! Checking for legality is deffered to the conversion to the internal move representation
+//! by a [`Position`] object.
 
 use thiserror::Error;
 
