@@ -1,11 +1,9 @@
 //! Enumerations of chessboard accessing constants, such as files, ranks and squares.
 use thiserror::Error;
 
-use super::bitboard::Bitboard;
+use crate::parsing::PartialFromStr;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
-#[error("Does not denote a valid file")]
-pub struct FileParseError;
+use super::bitboard::Bitboard;
 
 /// Files of a chessboard (A-H).
 #[repr(u8)]
@@ -124,27 +122,48 @@ impl std::fmt::Display for File {
         )
     }
 }
-impl std::str::FromStr for File {
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+pub enum FileParseError {
+    #[error("{0} does not denote a valid chessboard file")]
+    InvalidFileSymbol(char),
+    #[error("Cannot parse a file from an empty input")]
+    EmptyInput,
+    #[error("A file cannot be more than one character")]
+    InputTooLong,
+}
+impl PartialFromStr for File {
     type Err = FileParseError;
 
+    fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
+        let symbol = s.chars().next().ok_or(FileParseError::EmptyInput)?;
+        let file = match symbol.to_ascii_lowercase() {
+            'a' => Self::A,
+            'b' => Self::B,
+            'c' => Self::C,
+            'd' => Self::D,
+            'e' => Self::E,
+            'f' => Self::F,
+            'g' => Self::G,
+            'h' => Self::H,
+            _ => Err(FileParseError::InvalidFileSymbol(symbol))?,
+        };
+
+        Ok((file, &s[1..]))
+    }
+}
+impl std::str::FromStr for File {
+    type Err = FileParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.to_ascii_lowercase().as_str() {
-            "a" => Self::A,
-            "b" => Self::B,
-            "c" => Self::C,
-            "d" => Self::D,
-            "e" => Self::E,
-            "f" => Self::F,
-            "g" => Self::G,
-            "h" => Self::H,
-            _ => Err(FileParseError)?,
+        Self::partial_from_str(s).and_then(|(result, rest)| {
+            if rest.is_empty() {
+                Ok(result)
+            } else {
+                Err(FileParseError::InputTooLong)
+            }
         })
     }
 }
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
-#[error("Does not denote a valid rank")]
-pub struct RankParseError;
 
 /// Ranks of a chessboard (1-8).
 #[repr(u8)]
@@ -251,12 +270,39 @@ impl std::fmt::Display for Rank {
         write!(f, "{}", 1 + *self as u8)
     }
 }
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+pub enum RankParseError {
+    #[error("{0} does not denote a valid chessboard rank")]
+    InvalidRankSymbol(char),
+    #[error("Cannot parse a rank from an empty input")]
+    EmptyInput,
+    #[error("A rank cannot be more than one character")]
+    InputTooLong,
+}
+impl PartialFromStr for Rank {
+    type Err = RankParseError;
+
+    fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
+        let symbol = s.chars().next().ok_or(RankParseError::EmptyInput)?;
+        let rank = symbol
+            .to_digit(10)
+            .and_then(|i| Self::from_index(i.wrapping_sub(1) as u8))
+            .ok_or(RankParseError::InvalidRankSymbol(symbol))?;
+        Ok((rank, &s[symbol.len_utf8()..]))
+    }
+}
 impl std::str::FromStr for Rank {
     type Err = RankParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let index = s.parse::<u8>().map_err(|_| RankParseError)? - 1;
-        Self::from_index(index).ok_or(RankParseError)
+        Self::partial_from_str(s).and_then(|(result, rest)| {
+            if rest.is_empty() {
+                Ok(result)
+            } else {
+                Err(RankParseError::InputTooLong)
+            }
+        })
     }
 }
 
@@ -519,30 +565,33 @@ impl std::fmt::Display for Square {
 
 #[derive(Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Debug, Error)]
 pub enum SquareParseError {
-    #[error("Too many characters to denote a valid square")]
-    TooManyChars,
-    #[error("The first character does not denote a valid file")]
-    InvalidFile,
-    #[error("The second character does not denote a valid rank")]
-    InvalidRank,
+    #[error(transparent)]
+    InvalidFile(#[from] FileParseError),
+    #[error(transparent)]
+    InvalidRank(#[from] RankParseError),
+    #[error("A square cannot be more than two characters long")]
+    InputTooLong,
 }
+impl PartialFromStr for Square {
+    type Err = SquareParseError;
 
+    fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
+        let (file, s) = File::partial_from_str(s)?;
+        let (rank, s) = Rank::partial_from_str(s)?;
+        Ok((Square::new(file, rank), s))
+    }
+}
 impl std::str::FromStr for Square {
     type Err = SquareParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let chars = s.chars().map(|c| c.to_string()).collect::<Vec<_>>();
-        if chars.len() != 2 {
-            return Err(SquareParseError::TooManyChars);
-        }
-        Ok(Self::new(
-            chars[0]
-                .parse()
-                .map_err(|_| SquareParseError::InvalidFile)?,
-            chars[1]
-                .parse()
-                .map_err(|_| SquareParseError::InvalidRank)?,
-        ))
+        Self::partial_from_str(s).and_then(|(result, rest)| {
+            if rest.is_empty() {
+                Ok(result)
+            } else {
+                Err(SquareParseError::InputTooLong)
+            }
+        })
     }
 }
 

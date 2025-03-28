@@ -4,6 +4,8 @@ use std::str::FromStr;
 
 use thiserror::Error;
 
+use crate::parsing::PartialFromStr;
+
 use super::colour::Colour;
 
 /// Total number of different piece kinds (6).
@@ -13,7 +15,18 @@ const PIECE_SYMBOLS: [char; 12] = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 
 const PIECE_SYMBOLS_UNICODE: [char; 12] =
     ['♙', '♘', '♗', '♖', '♕', '♔', '♟', '♞', '♝', '♜', '♛', '♚'];
 
-/// Complete set of information for identifying a piece.
+/// Complete set of information for identifying a piece (colour and kind).
+///
+/// # Parsing
+/// Pieces can be parsed from their symbol ('p', 'n', 'b', 'r', 'q', 'k' for black,
+/// uppercase for white) or unicode symbols (U+2654 to U+2659 for white, U+265A to U+265F for black)
+/// using Rust's [`FromStr`] trait.
+/// ```
+/// # use horsey::chess::piece::*;
+/// # use horsey::chess::colour::*;
+/// assert_eq!("p".parse(), Ok(Piece::new(PieceKind::Pawn, Colour::Black)));
+/// assert_eq!("♕".parse(), Ok(Piece::new(PieceKind::Queen, Colour::White)));
+/// ```
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Piece {
     pub kind: PieceKind,
@@ -58,31 +71,53 @@ impl std::fmt::Display for Piece {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
-#[error("Invalid piece symbol")]
-pub struct PieceParseError;
+pub enum PieceParseError {
+    #[error("{0} is not a valid piece symbol")]
+    InvalidPieceSymbol(char),
+    #[error("Empty input")]
+    EmptyInput,
+    #[error("A piece can only be one character")]
+    InputTooLong,
+}
+impl PartialFromStr for Piece {
+    type Err = PieceParseError;
 
+    fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
+        let symbol = s.chars().next().ok_or(PieceParseError::EmptyInput)?;
+        let piece = match symbol {
+            'p' | '♟' => Self::new(PieceKind::Pawn, Colour::Black),
+            'n' | '♞' => Self::new(PieceKind::Knight, Colour::Black),
+            'b' | '♝' => Self::new(PieceKind::Bishop, Colour::Black),
+            'r' | '♜' => Self::new(PieceKind::Rook, Colour::Black),
+            'q' | '♛' => Self::new(PieceKind::Queen, Colour::Black),
+            'k' | '♚' => Self::new(PieceKind::King, Colour::Black),
+            'P' | '♙' => Self::new(PieceKind::Pawn, Colour::White),
+            'N' | '♘' => Self::new(PieceKind::Knight, Colour::White),
+            'B' | '♗' => Self::new(PieceKind::Bishop, Colour::White),
+            'R' | '♖' => Self::new(PieceKind::Rook, Colour::White),
+            'Q' | '♕' => Self::new(PieceKind::Queen, Colour::White),
+            'K' | '♔' => Self::new(PieceKind::King, Colour::White),
+            _ => Err(PieceParseError::InvalidPieceSymbol(symbol))?,
+        };
+
+        Ok((piece, &s[symbol.len_utf8()..]))
+    }
+}
 impl FromStr for Piece {
     type Err = PieceParseError;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let kind = match s.to_ascii_lowercase().as_str() {
-            "p" => PieceKind::Pawn,
-            "n" => PieceKind::Knight,
-            "b" => PieceKind::Bishop,
-            "r" => PieceKind::Rook,
-            "q" => PieceKind::Queen,
-            "k" => PieceKind::King,
-            _ => Err(PieceParseError)?,
-        };
-        Ok(Self {
-            kind,
-            colour: s.chars().next().unwrap().is_uppercase().into(),
+        Self::partial_from_str(s).and_then(|(result, rest)| {
+            if rest.is_empty() {
+                Ok(result)
+            } else {
+                Err(PieceParseError::InputTooLong)
+            }
         })
     }
 }
 
-/// The kind of a piece, one of Pawn, Knight, Bishop, Rook, Queen or King. Usually
-/// with supplementaty information about the color of the piece, in the form of
-/// the tuple type [`Piece`].
+/// The kind of a piece, one of Pawn, Knight, Bishop, Rook, Queen or King.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum PieceKind {
@@ -155,5 +190,137 @@ impl PieceKind {
 impl std::fmt::Display for PieceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", PIECE_SYMBOLS[*self as usize])
+    }
+}
+impl PartialFromStr for PieceKind {
+    type Err = PieceParseError;
+
+    fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
+        let symbol = s.chars().next().ok_or(PieceParseError::EmptyInput)?;
+        let piece = match symbol {
+            'p' | '♟' => PieceKind::Pawn,
+            'n' | '♞' => PieceKind::Knight,
+            'b' | '♝' => PieceKind::Bishop,
+            'r' | '♜' => PieceKind::Rook,
+            'q' | '♛' => PieceKind::Queen,
+            'k' | '♚' => PieceKind::King,
+            'P' | '♙' => PieceKind::Pawn,
+            'N' | '♘' => PieceKind::Knight,
+            'B' | '♗' => PieceKind::Bishop,
+            'R' | '♖' => PieceKind::Rook,
+            'Q' | '♕' => PieceKind::Queen,
+            'K' | '♔' => PieceKind::King,
+            _ => Err(PieceParseError::InvalidPieceSymbol(symbol))?,
+        };
+
+        Ok((piece, &s[symbol.len_utf8()..]))
+    }
+}
+impl FromStr for PieceKind {
+    type Err = PieceParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::partial_from_str(s).and_then(|(result, rest)| {
+            if rest.is_empty() {
+                Ok(result)
+            } else {
+                Err(PieceParseError::InputTooLong)
+            }
+        })
+    }
+}
+
+/// Special type that only contains valid promotion targets
+/// (knight, bishop, rook and queen).
+///
+/// This is used to avoid the hassle of testing if we represent invalid state
+/// within pawn promotion representations, parsing, etc.
+///
+/// Methods and trait implementation are made for an easy conversion to the standard
+/// [`PieceKind`] type. Most structures using [`PromotionTarget`] to avoid invalid
+/// state should return [`PieceKind`] for any method accessing the promotion value.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum PromotionTarget {
+    Knight = 1,
+    Bishop = 2,
+    Rook = 3,
+    Queen = 4,
+}
+impl PromotionTarget {
+    /// Converts a piece kind into a promotion target if such a transformation is valid.
+    pub fn from_piece_kind(p: PieceKind) -> Option<Self> {
+        Option::<Self>::from(p)
+    }
+
+    /// Converts this promotion target to the corresponding piece kind.
+    pub fn to_piece_kind(self) -> PieceKind {
+        PieceKind::from(self)
+    }
+}
+impl From<PieceKind> for Option<PromotionTarget> {
+    fn from(value: PieceKind) -> Self {
+        if value.is_valid_promotion_target() {
+            // SAFETY: The internal representations are sure to match due to `repr(u8)`.
+            Some(unsafe { std::mem::transmute(value) })
+        } else {
+            None
+        }
+    }
+}
+impl From<PromotionTarget> for PieceKind {
+    fn from(value: PromotionTarget) -> Self {
+        // SAFETY: The internal representations are sure to match due to `repr(u8)`.
+        unsafe { std::mem::transmute(value) }
+    }
+}
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+pub enum PromotionTargetParseError {
+    #[error("{0} is not a valid promotion target")]
+    InvalidPromotionTarget(char),
+    #[error("Empty input")]
+    EmptyInput,
+    #[error("A piece can only be one character")]
+    InputTooLong,
+}
+impl PartialFromStr for PromotionTarget {
+    type Err = PromotionTargetParseError;
+
+    fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
+        let symbol = s
+            .chars()
+            .next()
+            .ok_or(PromotionTargetParseError::EmptyInput)?;
+        let piece = match symbol {
+            'n' | '♞' => Self::Knight,
+            'b' | '♝' => Self::Bishop,
+            'r' | '♜' => Self::Rook,
+            'q' | '♛' => Self::Queen,
+            'N' | '♘' => Self::Knight,
+            'B' | '♗' => Self::Bishop,
+            'R' | '♖' => Self::Rook,
+            'Q' | '♕' => Self::Queen,
+            _ => Err(PromotionTargetParseError::InvalidPromotionTarget(symbol))?,
+        };
+
+        Ok((piece, &s[symbol.len_utf8()..]))
+    }
+}
+impl FromStr for PromotionTarget {
+    type Err = PromotionTargetParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::partial_from_str(s).and_then(|(result, rest)| {
+            if rest.is_empty() {
+                Ok(result)
+            } else {
+                Err(PromotionTargetParseError::InputTooLong)
+            }
+        })
+    }
+}
+impl std::fmt::Display for PromotionTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_piece_kind())
     }
 }

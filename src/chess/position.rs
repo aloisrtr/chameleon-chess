@@ -7,7 +7,7 @@ use crate::brain::feature::{feature_index, piece_feature_index};
 use std::hint::unreachable_unchecked;
 
 use super::{
-    action::{Action, ChessMove, SanMove, UciMove},
+    action::{Action, ChessMove, SanMove, SanMoveKind, UciMove},
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::Colour,
@@ -33,6 +33,7 @@ pub enum PlaceError {
 }
 
 /// Possible result of the game.
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum GameResult {
     /// A side is in checkmate. The value in this variant indicates which side **is in checkmate**,
     /// not the side that won.
@@ -41,7 +42,16 @@ pub enum GameResult {
     Draw(DrawKind),
 }
 
+/// The types of checks that can be given.
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum CheckKind {
+    CheckMate,
+    DoubleCheck,
+    Check,
+}
+
 /// All possible kinds of draw.
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum DrawKind {
     /// One side has no legal moves, yet is not in check.
     Stalemate,
@@ -262,7 +272,7 @@ impl Position {
             .find(|a| {
                 a.origin() == action.origin
                     && a.target() == action.target
-                    && a.promotion_target() == action.promoting_to
+                    && a.promotion_target_type() == action.promoting_to
             })
             .copied()
     }
@@ -272,11 +282,7 @@ impl Position {
     /// Return `None` if the move was illegal to play in this position.
     pub fn decode_uci(&self, action: Action) -> Option<UciMove> {
         if self.is_legal(action) {
-            Some(UciMove {
-                origin: action.origin(),
-                target: action.target(),
-                promoting_to: action.promotion_target(),
-            })
+            Some(UciMove::from(action))
         } else {
             None
         }
@@ -285,9 +291,13 @@ impl Position {
     /// Tries to convert a [`SanMove`] into an [`Action`].
     ///
     /// Returns `None` if the move was illegal in the current position.
+    ///
+    /// This encoding function is forgiving of missing check/checkmate markers
+    /// withing the SAN move notation. It will return the corresponding action
+    /// even if there was a checkmate marker and the move is not checkmate, and vice-versa.
     pub fn encode_san(&self, san: SanMove) -> Option<Action> {
-        let (origins, target, is_capture, promotion) = match san {
-            SanMove::PawnPush {
+        let (origins, target, is_capture, promotion) = match san.move_kind {
+            SanMoveKind::PawnPush {
                 target,
                 promoting_to,
             } => {
@@ -310,7 +320,7 @@ impl Position {
                 }
                 (origins, target, false, promoting_to)
             }
-            SanMove::PawnCapture {
+            SanMoveKind::PawnCapture {
                 origin_file,
                 target,
                 promoting_to,
@@ -322,7 +332,7 @@ impl Position {
                 };
                 (vec![origin], target, true, promoting_to)
             }
-            SanMove::PieceMove {
+            SanMoveKind::PieceMove {
                 moving_piece,
                 origin_file,
                 origin_rank,
@@ -341,14 +351,14 @@ impl Position {
                 origins_bb &= piece_bb & colour_bb;
                 (origins_bb.collect(), target, is_capture, None)
             }
-            SanMove::KingSideCastle => {
+            SanMoveKind::KingSideCastle => {
                 if self.side_to_move().is_white() {
                     (vec![Square::E1], Square::G1, false, None)
                 } else {
                     (vec![Square::E8], Square::G8, false, None)
                 }
             }
-            SanMove::QueenSideCastle => {
+            SanMoveKind::QueenSideCastle => {
                 if self.side_to_move().is_white() {
                     (vec![Square::E1], Square::C1, false, None)
                 } else {
@@ -356,12 +366,13 @@ impl Position {
                 }
             }
         };
+
         self.actions()
             .iter()
             .find(|a| {
                 a.target() == target
                     && a.is_capture() == is_capture
-                    && a.promotion_target() == promotion
+                    && a.promotion_target_type() == promotion
                     && origins.contains(&a.origin())
             })
             .copied()
@@ -370,24 +381,31 @@ impl Position {
     /// Tries to convert an [`Action`] into a [`SanMove`].
     ///
     /// Returns `None` if `action` was illegal in the current position.
+    ///
+    /// This does not encode check/checkmate information into the resulting
+    /// [`SanMove`].
     pub fn decode_san(&self, action: Action) -> Option<SanMove> {
+        if !self.is_legal(action) {
+            return None;
+        }
+
         let (moving_piece, _) = self.piece_on(action.origin())?;
-        if action.is_kingside_castle() {
-            Some(SanMove::KingSideCastle)
+        let move_kind = if action.is_kingside_castle() {
+            SanMoveKind::KingSideCastle
         } else if action.is_queenside_castle() {
-            Some(SanMove::QueenSideCastle)
+            SanMoveKind::QueenSideCastle
         } else if moving_piece == PieceKind::Pawn {
             if action.is_capture() {
-                Some(SanMove::PawnCapture {
+                SanMoveKind::PawnCapture {
                     origin_file: action.origin().file(),
                     target: action.target(),
-                    promoting_to: action.promotion_target(),
-                })
+                    promoting_to: action.promotion_target_type(),
+                }
             } else {
-                Some(SanMove::PawnPush {
+                SanMoveKind::PawnPush {
                     target: action.target(),
-                    promoting_to: action.promotion_target(),
-                })
+                    promoting_to: action.promotion_target_type(),
+                }
             }
         } else {
             let candidates: Vec<_> = self
@@ -406,6 +424,9 @@ impl Position {
                 .collect();
 
             let (origin_file, origin_rank) = if candidates.is_empty() {
+                // There are no valid candidates for this move
+                return None;
+            } else if candidates.len() == 1 {
                 // No ambiguity
                 (None, None)
             } else {
@@ -428,14 +449,19 @@ impl Position {
                     }
                 }
             };
-            Some(SanMove::PieceMove {
+            SanMoveKind::PieceMove {
                 moving_piece,
                 origin_file,
                 origin_rank,
                 is_capture: action.is_capture(),
                 target: action.target(),
-            })
-        }
+            }
+        };
+
+        return Some(SanMove {
+            move_kind,
+            check: None,
+        });
     }
 
     /// Makes a move on the board, modifying the position.
