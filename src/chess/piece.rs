@@ -277,7 +277,9 @@ impl From<PromotionTarget> for PieceKind {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
 pub enum PromotionTargetParseError {
     #[error("{0} is not a valid promotion target")]
-    InvalidPromotionTarget(char),
+    InvalidPromotionTarget(PieceKind),
+    #[error("{0} is not a valid piece symbol")]
+    InvalidPieceSymbol(char),
     #[error("Empty input")]
     EmptyInput,
     #[error("A piece can only be one character")]
@@ -300,7 +302,19 @@ impl PartialFromStr for PromotionTarget {
             'B' | '♗' => Self::Bishop,
             'R' | '♖' => Self::Rook,
             'Q' | '♕' => Self::Queen,
-            _ => Err(PromotionTargetParseError::InvalidPromotionTarget(symbol))?,
+            'p' | '♟' => Err(PromotionTargetParseError::InvalidPromotionTarget(
+                PieceKind::Pawn,
+            ))?,
+            'k' | '♚' => Err(PromotionTargetParseError::InvalidPromotionTarget(
+                PieceKind::King,
+            ))?,
+            'P' | '♙' => Err(PromotionTargetParseError::InvalidPromotionTarget(
+                PieceKind::Pawn,
+            ))?,
+            'K' | '♔' => Err(PromotionTargetParseError::InvalidPromotionTarget(
+                PieceKind::King,
+            ))?,
+            _ => Err(PromotionTargetParseError::InvalidPieceSymbol(symbol))?,
         };
 
         Ok((piece, &s[symbol.len_utf8()..]))

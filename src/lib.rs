@@ -10,5 +10,6 @@
 pub mod brain;
 pub mod chess;
 pub mod parsing;
+pub mod pgn;
 pub mod search;
 pub mod uci;

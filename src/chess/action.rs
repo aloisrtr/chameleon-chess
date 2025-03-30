@@ -15,7 +15,7 @@ use crate::parsing::PartialFromStr;
 
 use super::{
     colour::Colour,
-    piece::{Piece, PieceKind, PromotionTarget},
+    piece::{PieceKind, PromotionTarget},
     position::{CheckKind, Position},
     square::{File, FileParseError, Rank, RankParseError, Square, SquareParseError},
 };
@@ -501,7 +501,7 @@ impl PartialFromStr for SanMove {
         } else if s.len() >= "O-O".len() && &s[0.."O-O".len()] == "O-O" {
             (SanMoveKind::KingSideCastle, &s["O-O".len()..])
         } else {
-            let (moving_piece, s) = Option::<PieceKind>::partial_from_str(s)
+            let (mut moving_piece, s) = Option::<PieceKind>::partial_from_str(s)
                 .map(|(p, s)| (p.unwrap_or(PieceKind::Pawn), s))
                 .unwrap();
             let (origin_file, s) = Result::<File, FileParseError>::partial_from_str(s).unwrap();
@@ -516,7 +516,17 @@ impl PartialFromStr for SanMove {
                     if is_capture {
                         Err(SanParseError::InvalidTargetSquare(e))?
                     }
-                    let file = origin_file.map_err(|e| SanParseError::InvalidOriginFile(e))?;
+                    let file = match origin_file {
+                        Ok(file) => file,
+                        // The only problem we could have is when parsing moves like
+                        // "b4", which would count "b" as a bishop. This edge case
+                        // is handled here (I love case insensitivity)
+                        Err(_) if moving_piece == PieceKind::Bishop => {
+                            moving_piece = PieceKind::Pawn;
+                            File::B
+                        }
+                        Err(e) => Err(SanParseError::InvalidOriginFile(e))?,
+                    };
                     let rank = origin_rank.map_err(|e| SanParseError::InvalidOriginRank(e))?;
                     ((Square::new(file, rank), s), None, None)
                 }
