@@ -42,6 +42,25 @@ impl Bitboard {
         self.0 != 0
     }
 
+    /// Sets the square to occupied.
+    #[inline]
+    pub const fn set(&mut self, square: Square) {
+        self.0 |= square.bitboard().0
+    }
+
+    /// Sets the square to empty.
+    #[inline]
+    pub const fn unset(&mut self, square: Square) {
+        self.0 &= !square.bitboard().0
+    }
+
+    /// Toggles the occupancy of the square (if it was occupied it is now empty
+    /// and vice-versa).
+    #[inline]
+    pub const fn toggle(&mut self, square: Square) {
+        self.0 ^= square.bitboard().0
+    }
+
     /// Checks if a given square is set on the bitboard.
     #[inline]
     pub const fn is_set(&self, square: Square) -> bool {

@@ -1,79 +1,8 @@
 //! Helper functions for parsing PGN
 
+use crate::parsing::walk_whitespace_and_comments;
+
 use super::*;
-
-/// Returns the rest of the input after walking a comment.
-pub fn walk_whitespace_and_comments(mut src: &str) -> &str {
-    loop {
-        match src.chars().next() {
-            Some('{') => {
-                // Continue until we reach }
-                let (_, left) = src.split_once('}').unwrap();
-                src = left
-            }
-            Some(';') => {
-                // Continue until end of line or EOF.
-                let (_, left) = src.split_once('\n').unwrap();
-                src = left
-            }
-            Some(c) if c.is_whitespace() => {
-                src = src.trim_start();
-            }
-            _ => return src,
-        }
-    }
-}
-
-/// Parses a string value with escaped characters.
-pub fn parse_string(src: &str) -> Result<(String, &str), ()> {
-    let mut result = String::new();
-    let mut chars = src.chars();
-
-    match chars.next() {
-        Some('"') => (),
-        _ => return Err(()),
-    }
-
-    let mut escaped = false;
-    let mut escaped_count = 0;
-    while let Some(c) = chars.next() {
-        match c {
-            '"' if !escaped => break,
-            '\\' if !escaped => escaped = true,
-            '\t' => return Err(()),
-            _ => {
-                result.push(c);
-                if escaped {
-                    escaped_count += 1;
-                    escaped = false
-                }
-            }
-        }
-    }
-
-    let left = &src[result.len() + 2 + escaped_count..];
-    Ok((result, left))
-}
-
-/// Parses a a u16 value.
-pub fn parse_int(src: &str) -> Result<(u16, &str), ()> {
-    let mut result = 0u16;
-    let mut parsed = 0;
-    for c in src.chars() {
-        if let Some(digit) = c.to_digit(10) {
-            result = result * 10 + digit as u16;
-            parsed += 1
-        } else {
-            break;
-        }
-    }
-
-    if parsed != 0 {
-        Ok((result, &src[parsed..]))
-    } else {
-        Err(())
-    }
-}
 
 pub fn parse_game_result(src: &str) -> Result<(Option<GameResult>, &str), ()> {
     let is_prefix = |s: &str, pre: &str| s.len() >= pre.len() && &s[..pre.len()] == pre;
@@ -138,6 +67,8 @@ pub fn parse_tag_pairs(mut s: &str) -> Result<(Vec<PgnTagPair>, &str), PgnTagPai
 
 #[cfg(test)]
 mod test {
+    use crate::parsing::parse_string;
+
     use super::*;
 
     #[test]

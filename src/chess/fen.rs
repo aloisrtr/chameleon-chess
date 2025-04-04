@@ -7,7 +7,7 @@
 //! algorithms are made much more efficient if running on a CPU with BMI2 expansion, but
 //! will work on any CPU.
 
-use crate::chess::square::Rank;
+use crate::{chess::square::Rank, parsing::PartialFromStr};
 
 use super::{
     bitboard::Bitboard,
@@ -210,6 +210,42 @@ impl Fen {
             halfmove_clock,
             fullmove_counter: 1,
         })
+    }
+}
+impl PartialFromStr for Fen {
+    type Err = FenError;
+
+    fn partial_from_str(mut s: &str) -> Result<(Self, &str), Self::Err> {
+        fn parse_piece_section(mut s: &str) -> Result<([Bitboard; 8], &str), ()> {
+            let mut bitboards = [Bitboard::empty(); 8];
+            let mut squares = Square::squares_fen_iter();
+            while let Some(c) = s.chars().next() {
+                if let Some(digit) = c.to_digit(10) {
+                    squares.skip(digit);
+                    s = &s[1..];
+                } else if c == '/' {
+                    s = &s[1..];
+                    squares.next();
+                } else if c == ' ' {
+                    break;
+                } else {
+                    let (piece, left) = Piece::partial_from_str(s).unwrap();
+                    let square = squares.next().unwrap();
+                    bitboards[NUM_COLOURS + piece.kind as usize].set(square);
+                    bitboards[piece.colour as usize].set(square);
+                    s = left
+                }
+            }
+
+            if squares.next().is_some() {
+                // TODO: error not all squares were set
+                Err(())
+            } else {
+                Ok((bitboards, s))
+            }
+        }
+
+        let (bitboards, s) = parse_piece_section(s).unwrap();
     }
 }
 impl std::str::FromStr for Fen {
