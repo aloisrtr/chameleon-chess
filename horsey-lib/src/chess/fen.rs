@@ -7,17 +7,20 @@
 //! algorithms are made much more efficient if running on a CPU with BMI2 expansion, but
 //! will work on any CPU.
 
-use crate::{chess::square::Rank, parsing::PartialFromStr};
+use crate::{
+    chess::square::Rank,
+    parsing::{PartialFromStr, parse_int, walk_whitespace},
+};
 
 use super::{
     bitboard::Bitboard,
     castling_rights::CastlingRights,
     colour::{Colour, NUM_COLOURS},
-    piece::{Piece, PieceKind, NUM_PIECES},
+    piece::{NUM_PIECES, Piece, PieceKind},
     square::Square,
 };
 
-#[cfg(feature = "fen-compression")]
+#[cfg(feature = "serde")]
 use bitstream_io::{BitRead, BitWrite};
 use thiserror::Error;
 
@@ -99,7 +102,7 @@ impl Fen {
     }
 
     /// Compresses a FEN string for efficient storage.
-    #[cfg(feature = "fen-compression")]
+    #[cfg(feature = "serde")]
     pub fn compress<W: BitWrite>(&self, stream: &mut W) -> std::io::Result<()> {
         let mut rocc =
             self.bitboards[Colour::White as usize] | self.bitboards[Colour::Black as usize];
@@ -145,7 +148,7 @@ impl Fen {
     }
 
     /// Decompresses a FEN string from a packed storage.
-    #[cfg(feature = "fen-compression")]
+    #[cfg(feature = "serde")]
     pub fn decompress<R: BitRead>(stream: &mut R) -> std::io::Result<Self> {
         let mut bitboards = [Bitboard::empty(); 8];
 
@@ -215,13 +218,15 @@ impl Fen {
 impl PartialFromStr for Fen {
     type Err = FenError;
 
-    fn partial_from_str(mut s: &str) -> Result<(Self, &str), Self::Err> {
-        fn parse_piece_section(mut s: &str) -> Result<([Bitboard; 8], &str), ()> {
+    fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
+        fn parse_piece_section(mut s: &str) -> Result<([Bitboard; 8], &str), FenError> {
             let mut bitboards = [Bitboard::empty(); 8];
             let mut squares = Square::squares_fen_iter();
             while let Some(c) = s.chars().next() {
                 if let Some(digit) = c.to_digit(10) {
-                    squares.skip(digit);
+                    for _ in 0..digit {
+                        _ = squares.next()
+                    }
                     s = &s[1..];
                 } else if c == '/' {
                     s = &s[1..];
@@ -238,112 +243,62 @@ impl PartialFromStr for Fen {
             }
 
             if squares.next().is_some() {
-                // TODO: error not all squares were set
-                Err(())
+                Err(FenError::Incomplete("Piece placement"))
             } else {
                 Ok((bitboards, s))
             }
         }
 
-        let (bitboards, s) = parse_piece_section(s).unwrap();
+        let (bitboards, s) = parse_piece_section(s)?;
+
+        let side_to_move = match walk_whitespace(s).chars().next() {
+            Some('w') => Colour::White,
+            Some('b') => Colour::Black,
+            _ => Err(FenError::Incomplete("Side to play"))?,
+        };
+        let s = &s[1..];
+
+        // TODO: handle error
+        let (castling_rights, s) = CastlingRights::partial_from_str(walk_whitespace(s)).unwrap();
+
+        let s = walk_whitespace(s);
+        let (en_passant, s) = match s.chars().next() {
+            Some('-') => (None, &s[1..]),
+            Some(_) => {
+                // TODO error invalid ep square
+                let (sq, s) = Square::partial_from_str(s).unwrap();
+                (Some(sq), s)
+            }
+            None => Err(FenError::Incomplete("En passant target"))?,
+        };
+
+        // TODO: check errors here
+        let (halfmove_clock, s) = parse_int(walk_whitespace(s)).unwrap();
+        let (fullmove_counter, s) = parse_int(walk_whitespace(s)).unwrap();
+
+        Ok((
+            Self {
+                bitboards,
+                side_to_move,
+                en_passant,
+                castling_rights,
+                halfmove_clock,
+                fullmove_counter,
+            },
+            s,
+        ))
     }
 }
 impl std::str::FromStr for Fen {
     type Err = FenError;
 
     fn from_str(fen_str: &str) -> Result<Self, Self::Err> {
-        if !fen_str.is_ascii() {
-            return Err(FenError::NonAscii);
-        }
-
-        let mut bitboards = [Bitboard::empty(); 8];
-        let sections = fen_str.split_ascii_whitespace().collect::<Vec<_>>();
-        let pieces_str = sections.first().ok_or(FenError::Incomplete("pieces"))?;
-        let mut squares = Square::squares_fen_iter();
-        for c in pieces_str.chars() {
-            let colour = if c.is_ascii_lowercase() {
-                Colour::Black
+        Self::partial_from_str(fen_str).and_then(|(fen, s)| {
+            if s.is_empty() {
+                Ok(fen)
             } else {
-                Colour::White
-            };
-            match c.to_ascii_lowercase() {
-                'p' => {
-                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
-                    bitboards[PieceKind::Pawn as usize + 2] |= sq_bb;
-                    bitboards[colour as usize] |= sq_bb;
-                }
-                'n' => {
-                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
-                    bitboards[PieceKind::Knight as usize + 2] |= sq_bb;
-                    bitboards[colour as usize] |= sq_bb;
-                }
-                'b' => {
-                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
-                    bitboards[PieceKind::Bishop as usize + 2] |= sq_bb;
-                    bitboards[colour as usize] |= sq_bb;
-                }
-                'r' => {
-                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
-                    bitboards[PieceKind::Rook as usize + 2] |= sq_bb;
-                    bitboards[colour as usize] |= sq_bb;
-                }
-                'q' => {
-                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
-                    bitboards[PieceKind::Queen as usize + 2] |= sq_bb;
-                    bitboards[colour as usize] |= sq_bb;
-                }
-                'k' => {
-                    let sq_bb = squares.next().ok_or(FenError::TooManySquares)?.bitboard();
-                    bitboards[PieceKind::King as usize + 2] |= sq_bb;
-                    bitboards[colour as usize] |= sq_bb;
-                }
-                '/' => continue,
-                digit if digit.is_ascii_digit() => {
-                    let skip = digit.to_digit(10).unwrap() as usize;
-                    if skip > 8 {
-                        return Err(FenError::UnexpectedToken {
-                            index: 0,
-                            val: digit,
-                        });
-                    }
-                    for _ in 0..skip {
-                        squares.next();
-                    }
-                }
-                c => return Err(FenError::UnexpectedToken { index: 0, val: c }),
+                Err(FenError::ParseError)
             }
-        }
-
-        let side_to_move = match *sections
-            .get(1)
-            .ok_or(FenError::Incomplete("Side to move"))?
-        {
-            "w" => Colour::White,
-            "b" => Colour::Black,
-            _ => return Err(FenError::UnexpectedToken { index: 0, val: '0' }),
-        };
-
-        let castling_rights = sections
-            .get(2)
-            .ok_or(FenError::Incomplete("Castling rights"))?
-            .parse()
-            .map_err(|_| FenError::ParseError)?;
-
-        let en_passant = match *sections.get(3).ok_or(FenError::Incomplete("En passant"))? {
-            "-" => None,
-            s => Some(s.parse::<Square>().map_err(|_| FenError::ParseError)?),
-        };
-
-        let halfmove_clock = sections.get(4).unwrap_or(&"0").parse().unwrap();
-        let fullmove_counter = sections.get(5).unwrap_or(&"1").parse().unwrap();
-
-        Ok(Self {
-            bitboards,
-            side_to_move,
-            castling_rights,
-            en_passant,
-            halfmove_clock,
-            fullmove_counter,
         })
     }
 }
@@ -402,15 +357,14 @@ impl std::fmt::Debug for Fen {
 
 #[cfg(test)]
 mod test {
-    use std::io::Cursor;
-
-    #[cfg(feature = "fen-compression")]
+    #[cfg(feature = "serde")]
     use bitstream_io::{BigEndian, BitReader, BitWriter};
 
+    #[cfg(feature = "serde")]
     use super::*;
 
     #[test]
-    #[cfg(feature = "fen-compression")]
+    #[cfg(feature = "serde")]
     fn compress_decompress_ok() {
         let fen: Fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
             .parse()

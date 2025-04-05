@@ -3,13 +3,13 @@
 use std::{
     io::Write,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 
 use crate::{
     brain::nnue::{self, NnueAccumulator},
@@ -97,7 +97,7 @@ impl<O: Write> MctsWorker<O> {
             let (selected, expandable) = self.select(self.root.clone(), &mut position);
             let reward = if expandable {
                 let expanded = self.expand(selected.clone(), &mut position);
-                let reward = self._playout(&mut position);
+                let reward = self.playout(&mut position);
 
                 expanded.update_value(reward);
                 reward
@@ -179,8 +179,10 @@ impl<O: Write> MctsWorker<O> {
         }
     }
 
-    fn _playout(&self, position: &mut Position) -> Value {
+    #[allow(dead_code)]
+    fn playout(&self, position: &mut Position) -> Value {
         let original = position.clone();
+        let mut rng = SmallRng::seed_from_u64(0x731998767278A3C5);
         let mut depth = 0;
         let value = loop {
             if depth > 255 || position.fifty_move_draw() || position.threefold_repetition() {
@@ -188,7 +190,7 @@ impl<O: Write> MctsWorker<O> {
             }
 
             let actions = position.actions();
-            if let Some(action) = actions.choose(&mut thread_rng()) {
+            if let Some(action) = actions.choose(&mut rng) {
                 unsafe {
                     position.make_unchecked(*action);
                 }

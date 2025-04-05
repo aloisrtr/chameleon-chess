@@ -1,39 +1,6 @@
-[package]
-name = "horsey"
-version = "0.1.0"
-edition = "2021"
-authors = ["Aloïs Rautureau <thinkingrocks@proton.me>"]
-license = "AGPL-3.0-only"
-description = "A chess engine that doubles as a chess library."
-
-[dependencies]
-heapless = "0.8"
-thiserror = "2.0"
-clap = { version = "4.5.4", features = ["derive"] }
-log = "0.4"
-num_cpus = "1.16"
-rand = { version = "0.8.5", features = ["small_rng"] }
-env_logger = "0.11"
-
-burn = { version = "0.15", features = ["wgpu", "train"], optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-bitstream-io = { version = "2.6", optional = true }
-
-
-[profile.release]
-lto = true
-panic = "abort"
-codegen-units = 1
-incremental = true
-
-[profile.dev]
-opt-level = 2
-incremental = true
-
-[features]
-default = ["perft", "fen-compression"]
-perft = []
-fen-compression = ["dep:serde", "dep:bitstream-io"]
-train = ["dep:burn"]
-
-
+[workspace]
+resolver = "3"
+members = [
+  "horsey-lib",
+  "horsey-bin"
+]

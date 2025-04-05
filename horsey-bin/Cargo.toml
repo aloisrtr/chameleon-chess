@@ -1,0 +1,21 @@
+[package]
+name = "horsey-bin"
+version = "0.1.0"
+edition = "2024"
+authors = ["Aloïs Rautureau <thinkingrocks@proton.me>"]
+license = "AGPL-3.0-only"
+description = "UCI compatible chess engine."
+
+[profile.release]
+lto = true
+panic = "abort"
+codegen-units = 1
+incremental = true
+
+[profile.dev]
+opt-level = 2
+incremental = true
+
+[dependencies]
+horsey = { path = "../horsey-lib" }
+env_logger = { version = "0.11", default-features = false}

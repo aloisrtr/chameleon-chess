@@ -109,7 +109,7 @@ impl Bitboard {
     /// If passed an empty bitboard, the index will be 64 (out of bounds thus not usable).
     #[inline]
     pub const unsafe fn lowest_set_square_unchecked(&self) -> Square {
-        Square::from_index_unchecked(self.0.trailing_zeros() as u8)
+        unsafe { Square::from_index_unchecked(self.0.trailing_zeros() as u8) }
     }
 
     /// Pops the LS1B in the bitboard and returns its index.
@@ -129,7 +129,7 @@ impl Bitboard {
     /// If passed an empty bitboard, the returned index will be 64 (out of bounds thus not usable)
     #[inline]
     pub unsafe fn pop_lowest_set_square_unchecked(&mut self) -> Square {
-        let square = self.lowest_set_square_unchecked();
+        let square = unsafe { self.lowest_set_square_unchecked() };
         self.0 &= self.0.wrapping_sub(1);
         square
     }
@@ -151,7 +151,7 @@ impl Bitboard {
     /// If passed an empty bitboard, the index will be 64 (out of bounds thus not usable).
     #[inline]
     pub const unsafe fn highest_set_square_unchecked(&self) -> Square {
-        Square::from_index_unchecked(self.0.leading_zeros() as u8)
+        unsafe { Square::from_index_unchecked(self.0.leading_zeros() as u8) }
     }
 
     /// Pops the MS1B in the bitboard and returns its index.
@@ -171,7 +171,7 @@ impl Bitboard {
     /// If passed an empty bitboard, the returned index will be 64 (out of bounds thus not usable)
     #[inline]
     pub unsafe fn pop_highest_set_square_unchecked(&mut self) -> Square {
-        let square = self.highest_set_square_unchecked();
+        let square = unsafe { self.highest_set_square_unchecked() };
         *self ^= square.bitboard();
         square
     }

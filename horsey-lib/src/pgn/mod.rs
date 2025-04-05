@@ -6,7 +6,7 @@ use std::fmt::{Arguments, Write};
 
 use thiserror::Error;
 
-use crate::parsing::PartialFromStr;
+use crate::parsing::*;
 
 use super::chess::{
     action::SanMove,
@@ -317,15 +317,12 @@ impl std::fmt::Display for PgnMoveText {
         }
         write_or_flush(
             f,
-            format_args!(
-                " {}",
-                match self.result {
-                    None => "*",
-                    Some(GameResult::Checkmate(Colour::White)) => "0-1",
-                    Some(GameResult::Checkmate(Colour::Black)) => "1-0",
-                    Some(GameResult::Draw(_)) => "1/2-1/2",
-                }
-            ),
+            format_args!(" {}", match self.result {
+                None => "*",
+                Some(GameResult::Checkmate(Colour::White)) => "0-1",
+                Some(GameResult::Checkmate(Colour::Black)) => "1-0",
+                Some(GameResult::Draw(_)) => "1/2-1/2",
+            }),
             &mut line_buffer,
         )?;
         write!(f, "{line_buffer}")

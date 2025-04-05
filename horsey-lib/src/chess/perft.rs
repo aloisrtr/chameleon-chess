@@ -182,10 +182,9 @@ mod test {
     #[test]
     #[ignore]
     fn initial_position_perft() {
-        check_matching(
-            &mut Position::initial(),
-            &[20, 400, 8902, 197281, 4865609, 119060324, 3195901860],
-        )
+        check_matching(&mut Position::initial(), &[
+            20, 400, 8902, 197281, 4865609, 119060324, 3195901860,
+        ])
     }
 
     #[test]

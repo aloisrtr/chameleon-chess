@@ -2,7 +2,7 @@
 
 use std::sync::LazyLock;
 
-use rand::{thread_rng, Rng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 
 use super::{
     colour::Colour,
@@ -11,9 +11,10 @@ use super::{
 };
 
 pub static ZOBRIST_KEYS: LazyLock<[u64; 781]> = LazyLock::new(|| {
+    let mut rng = SmallRng::seed_from_u64(0x6F2DF0EAF362C1ED);
     let mut keys = [0; 781];
     for key in &mut keys {
-        *key = thread_rng().gen()
+        *key = rng.random()
     }
     keys
 });

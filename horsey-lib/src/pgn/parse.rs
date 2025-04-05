@@ -1,8 +1,28 @@
 //! Helper functions for parsing PGN
 
-use crate::parsing::walk_whitespace_and_comments;
-
 use super::*;
+
+/// Returns the rest of the input after walking a comment.
+pub fn walk_whitespace_and_comments(mut src: &str) -> &str {
+    loop {
+        match src.chars().next() {
+            Some('{') => {
+                // Continue until we reach }
+                let (_, left) = src.split_once('}').unwrap();
+                src = left
+            }
+            Some(';') => {
+                // Continue until end of line or EOF.
+                let (_, left) = src.split_once('\n').unwrap();
+                src = left
+            }
+            Some(c) if c.is_whitespace() => {
+                src = src.trim_start();
+            }
+            _ => return src,
+        }
+    }
+}
 
 pub fn parse_game_result(src: &str) -> Result<(Option<GameResult>, &str), ()> {
     let is_prefix = |s: &str, pre: &str| s.len() >= pre.len() && &s[..pre.len()] == pre;
@@ -161,27 +181,24 @@ mod test {
             [Forgot_this "Sad"]
         "#;
         let (tags, _) = parse_tag_pairs(input).unwrap();
-        assert_eq!(
-            &tags,
-            &[
-                PgnTagPair {
-                    tag: "Event".to_string(),
-                    value: "World chess championship".into()
-                },
-                PgnTagPair {
-                    tag: "Date".into(),
-                    value: "2025.09.12".into()
-                },
-                PgnTagPair {
-                    tag: "Forgot_this".into(),
-                    value: "Sad".into()
-                },
-                PgnTagPair {
-                    tag: "RandomTag".into(),
-                    value: "Finished newline".into()
-                },
-            ]
-        )
+        assert_eq!(&tags, &[
+            PgnTagPair {
+                tag: "Event".to_string(),
+                value: "World chess championship".into()
+            },
+            PgnTagPair {
+                tag: "Date".into(),
+                value: "2025.09.12".into()
+            },
+            PgnTagPair {
+                tag: "Forgot_this".into(),
+                value: "Sad".into()
+            },
+            PgnTagPair {
+                tag: "RandomTag".into(),
+                value: "Finished newline".into()
+            },
+        ])
     }
 
     #[test]
@@ -251,8 +268,7 @@ mod test {
             1.e4 e5 2.Nf3 (Nb3 (d4 Na6) Nc6 3.Bc4) 2...Nc6 3.Bb5 {This opening is called the Ruy Lopez.} 3...a6
             4.Ba4 Nf6 5.O-O Be7 *
         "#;
-        let expected =
-            "1.e4 e5 2.Nf3 (2.Nb3 (2.d4 Na6) 2...Nc6 3.Bc4) 2...Nc6 3.Bb5 a6 4.Ba4 Nf6 5.O-O \nBe7 *";
+        let expected = "1.e4 e5 2.Nf3 (2.Nb3 (2.d4 Na6) 2...Nc6 3.Bc4) 2...Nc6 3.Bb5 a6 4.Ba4 Nf6 5.O-O \nBe7 *";
         match PgnMoveText::partial_from_str(input) {
             Ok((movetext, _)) => {
                 assert_eq!(format!("{movetext}").trim(), expected)

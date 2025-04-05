@@ -45,28 +45,6 @@ impl<T: PartialFromStr> PartialFromStr for Result<T, <T as PartialFromStr>::Err>
     }
 }
 
-/// Returns the rest of the input after walking a comment.
-pub(crate) fn walk_whitespace_and_comments(mut src: &str) -> &str {
-    loop {
-        match src.chars().next() {
-            Some('{') => {
-                // Continue until we reach }
-                let (_, left) = src.split_once('}').unwrap();
-                src = left
-            }
-            Some(';') => {
-                // Continue until end of line or EOF.
-                let (_, left) = src.split_once('\n').unwrap();
-                src = left
-            }
-            Some(c) if c.is_whitespace() => {
-                src = src.trim_start();
-            }
-            _ => return src,
-        }
-    }
-}
-
 /// Parses a string value with escaped characters.
 pub(crate) fn parse_string(src: &str) -> Result<(String, &str), ()> {
     let mut result = String::new();
@@ -116,4 +94,9 @@ pub(crate) fn parse_int(src: &str) -> Result<(u16, &str), ()> {
     } else {
         Err(())
     }
+}
+
+/// Returns the rest of the input after walking whitespace values.
+pub fn walk_whitespace(src: &str) -> &str {
+    src.trim_start()
 }

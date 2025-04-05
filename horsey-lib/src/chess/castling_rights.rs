@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use crate::parsing::PartialFromStr;
+
 use super::{
     bitboard::Bitboard,
     colour::Colour,
@@ -124,6 +126,7 @@ impl CastlingRights {
     }
 
     /// Returns the castling mask for rooks.
+    #[allow(dead_code)]
     #[inline(always)]
     pub(crate) fn castle_mask(self) -> Bitboard {
         let mut res = Bitboard::empty();
@@ -142,22 +145,36 @@ impl CastlingRights {
         res
     }
 }
+impl PartialFromStr for CastlingRights {
+    // TODO: better error
+    type Err = ();
+
+    fn partial_from_str(mut s: &str) -> Result<(Self, &str), Self::Err> {
+        let mut rights = Self::EMPTY;
+        while let Some(c) = s.chars().next() {
+            match c {
+                '-' if rights == Self::EMPTY => return Ok((Self(Self::EMPTY), &s[1..])),
+                'k' if rights & Self::KINGSIDE_BLACK == 0 => rights |= Self::KINGSIDE_BLACK,
+                'q' if rights & Self::QUEENSIDE_BLACK == 0 => rights |= Self::QUEENSIDE_BLACK,
+                'K' if rights & Self::KINGSIDE_WHITE == 0 => rights |= Self::KINGSIDE_WHITE,
+                'Q' if rights & Self::QUEENSIDE_WHITE == 0 => rights |= Self::QUEENSIDE_WHITE,
+                _ => break,
+            }
+            s = &s[1..]
+        }
+        if rights == Self::EMPTY {
+            // TODO: better error
+            Err(())
+        } else {
+            Ok((Self(rights), s))
+        }
+    }
+}
 impl FromStr for CastlingRights {
     // TODO: better error
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut rights = 0;
-        for c in s.chars() {
-            match c {
-                'k' => rights |= Self::KINGSIDE_BLACK,
-                'q' => rights |= Self::QUEENSIDE_BLACK,
-                'K' => rights |= Self::KINGSIDE_WHITE,
-                'Q' => rights |= Self::QUEENSIDE_WHITE,
-                '-' => return Ok(Self(Self::EMPTY)),
-                _ => return Err(()),
-            }
-        }
-        Ok(Self(rights))
+        Self::partial_from_str(s).and_then(|(r, s)| if s.is_empty() { Err(()) } else { Ok(r) })
     }
 }
 impl std::fmt::Display for CastlingRights {

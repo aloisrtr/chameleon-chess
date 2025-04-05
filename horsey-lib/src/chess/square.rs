@@ -65,7 +65,7 @@ impl File {
     /// ```
     #[inline]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
-        std::mem::transmute(index)
+        unsafe { std::mem::transmute(index) }
     }
 
     /// The index of this file.
@@ -106,20 +106,16 @@ impl std::ops::SubAssign<Delta> for File {
 }
 impl std::fmt::Display for File {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::A => 'a',
-                Self::B => 'b',
-                Self::C => 'c',
-                Self::D => 'd',
-                Self::E => 'e',
-                Self::F => 'f',
-                Self::G => 'g',
-                Self::H => 'h',
-            }
-        )
+        write!(f, "{}", match self {
+            Self::A => 'a',
+            Self::B => 'b',
+            Self::C => 'c',
+            Self::D => 'd',
+            Self::E => 'e',
+            Self::F => 'f',
+            Self::G => 'g',
+            Self::H => 'h',
+        })
     }
 }
 
@@ -226,7 +222,7 @@ impl Rank {
     /// ```
     #[inline]
     pub unsafe fn from_index_unchecked(index: u8) -> Self {
-        std::mem::transmute(index)
+        unsafe { std::mem::transmute(index) }
     }
 
     /// The index of this rank.
@@ -438,7 +434,7 @@ impl Square {
     /// If the index is more than 63, causes undefined behavior.
     #[inline]
     pub const unsafe fn from_index_unchecked(index: u8) -> Self {
-        std::mem::transmute(index)
+        unsafe { std::mem::transmute(index) }
     }
 
     /// Returns the rank of the square.
@@ -507,7 +503,7 @@ impl Square {
     /// undefined behavior.
     #[inline]
     pub const unsafe fn translate_unchecked(self, delta: Delta) -> Self {
-        std::mem::transmute((self as u8).wrapping_add_signed(delta as i8))
+        unsafe { std::mem::transmute((self as u8).wrapping_add_signed(delta as i8)) }
     }
 
     /// An iterator over all squares, ordered from A1 to H8.

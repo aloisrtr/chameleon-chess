@@ -728,73 +728,73 @@ const fn diagonal_attacks(origin: Square, blockers: Bitboard) -> Bitboard {
             | south_west_ray(bb, empty),
     )
 }
-const fn south_ray(mut gen: u64, mut empt: u64) -> u64 {
-    gen |= empt & (gen >> 8);
-    empt &= empt >> 8;
-    gen |= empt & (gen >> 16);
-    empt &= empt >> 16;
-    gen |= empt & (gen >> 32);
-    gen >> 8
+const fn south_ray(mut filled: u64, mut empty: u64) -> u64 {
+    filled |= empty & (filled >> 8);
+    empty &= empty >> 8;
+    filled |= empty & (filled >> 16);
+    empty &= empty >> 16;
+    filled |= empty & (filled >> 32);
+    filled >> 8
 }
-const fn north_ray(mut gen: u64, mut empt: u64) -> u64 {
-    gen |= empt & (gen << 8);
-    empt &= empt << 8;
-    gen |= empt & (gen << 16);
-    empt &= empt << 16;
-    gen |= empt & (gen << 32);
-    gen << 8
+const fn north_ray(mut filled: u64, mut empty: u64) -> u64 {
+    filled |= empty & (filled << 8);
+    empty &= empty << 8;
+    filled |= empty & (filled << 16);
+    empty &= empty << 16;
+    filled |= empty & (filled << 32);
+    filled << 8
 }
-const fn east_ray(mut gen: u64, mut empt: u64) -> u64 {
-    empt &= !File::A.bitboard().0;
-    gen |= empt & (gen << 1);
-    empt &= empt << 1;
-    gen |= empt & (gen << 2);
-    empt &= empt << 2;
-    gen |= empt & (gen << 4);
-    (gen << 1) & !File::A.bitboard().0
+const fn east_ray(mut filled: u64, mut empty: u64) -> u64 {
+    empty &= !File::A.bitboard().0;
+    filled |= empty & (filled << 1);
+    empty &= empty << 1;
+    filled |= empty & (filled << 2);
+    empty &= empty << 2;
+    filled |= empty & (filled << 4);
+    (filled << 1) & !File::A.bitboard().0
 }
-const fn north_east_ray(mut gen: u64, mut empt: u64) -> u64 {
-    empt &= !File::A.bitboard().0;
-    gen |= empt & (gen << 9);
-    empt &= empt << 9;
-    gen |= empt & (gen << 18);
-    empt &= empt << 18;
-    gen |= empt & (gen << 36);
-    (gen << 9) & !File::A.bitboard().0
+const fn north_east_ray(mut filled: u64, mut empty: u64) -> u64 {
+    empty &= !File::A.bitboard().0;
+    filled |= empty & (filled << 9);
+    empty &= empty << 9;
+    filled |= empty & (filled << 18);
+    empty &= empty << 18;
+    filled |= empty & (filled << 36);
+    (filled << 9) & !File::A.bitboard().0
 }
-const fn south_east_ray(mut gen: u64, mut empt: u64) -> u64 {
-    empt &= !File::A.bitboard().0;
-    gen |= empt & (gen >> 7);
-    empt &= empt >> 7;
-    gen |= empt & (gen >> 14);
-    empt &= empt >> 14;
-    gen |= empt & (gen >> 28);
-    (gen >> 7) & !File::A.bitboard().0
+const fn south_east_ray(mut filled: u64, mut empty: u64) -> u64 {
+    empty &= !File::A.bitboard().0;
+    filled |= empty & (filled >> 7);
+    empty &= empty >> 7;
+    filled |= empty & (filled >> 14);
+    empty &= empty >> 14;
+    filled |= empty & (filled >> 28);
+    (filled >> 7) & !File::A.bitboard().0
 }
-const fn west_ray(mut gen: u64, mut empt: u64) -> u64 {
-    empt &= !File::H.bitboard().0;
-    gen |= empt & (gen >> 1);
-    empt &= empt >> 1;
-    gen |= empt & (gen >> 2);
-    empt &= empt >> 2;
-    gen |= empt & (gen >> 4);
-    (gen >> 1) & !File::H.bitboard().0
+const fn west_ray(mut filled: u64, mut empty: u64) -> u64 {
+    empty &= !File::H.bitboard().0;
+    filled |= empty & (filled >> 1);
+    empty &= empty >> 1;
+    filled |= empty & (filled >> 2);
+    empty &= empty >> 2;
+    filled |= empty & (filled >> 4);
+    (filled >> 1) & !File::H.bitboard().0
 }
-const fn north_west_ray(mut gen: u64, mut empt: u64) -> u64 {
-    empt &= !File::H.bitboard().0;
-    gen |= empt & (gen << 7);
-    empt &= empt << 7;
-    gen |= empt & (gen << 14);
-    empt &= empt << 14;
-    gen |= empt & (gen << 28);
-    (gen << 7) & !File::H.bitboard().0
+const fn north_west_ray(mut filled: u64, mut empty: u64) -> u64 {
+    empty &= !File::H.bitboard().0;
+    filled |= empty & (filled << 7);
+    empty &= empty << 7;
+    filled |= empty & (filled << 14);
+    empty &= empty << 14;
+    filled |= empty & (filled << 28);
+    (filled << 7) & !File::H.bitboard().0
 }
-const fn south_west_ray(mut gen: u64, mut empt: u64) -> u64 {
-    empt &= !File::H.bitboard().0;
-    gen |= empt & (gen >> 9);
-    empt &= empt >> 9;
-    gen |= empt & (gen >> 18);
-    empt &= empt >> 18;
-    gen |= empt & (gen >> 36);
-    (gen >> 9) & !File::H.bitboard().0
+const fn south_west_ray(mut filled: u64, mut empty: u64) -> u64 {
+    empty &= !File::H.bitboard().0;
+    filled |= empty & (filled >> 9);
+    empty &= empty >> 9;
+    filled |= empty & (filled >> 18);
+    empty &= empty >> 18;
+    filled |= empty & (filled >> 36);
+    (filled >> 9) & !File::H.bitboard().0
 }

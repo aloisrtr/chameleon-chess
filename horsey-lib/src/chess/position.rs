@@ -512,14 +512,16 @@ impl Position {
         let origin = mv.origin();
         let target = mv.target();
         let move_bitboard = origin.bitboard() | target.bitboard();
-        let Some(mut moving_kind) = self.pieces.get_unchecked(origin as usize) else {
-            unreachable_unchecked()
+        let mut moving_kind = unsafe {
+            self.pieces
+                .get_unchecked(origin as usize)
+                .unwrap_unchecked()
         };
         self.should_refresh |= moving_kind == PieceKind::King;
 
         self.history.push(HistoryEntry {
             played: mv,
-            captured: *self.pieces.get_unchecked(target as usize),
+            captured: unsafe { *self.pieces.get_unchecked(target as usize) },
             castling_rights: self.castling_rights,
             reversible_moves: self.reversible_moves,
             en_passant_file: self.en_passant_file,
@@ -545,7 +547,7 @@ impl Position {
                     .castling_rights
                     .disallow_queenside_castle(Colour::Black),
                 Square::H8 => self.castling_rights.disallow_kingside_castle(Colour::Black),
-                _ => unreachable_unchecked(),
+                _ => unsafe { unreachable_unchecked() },
             }
         }
         self.hash ^= self.castling_rights.zobrist_hash();
@@ -554,7 +556,9 @@ impl Position {
         if let Some(to) = mv.promotion_target() {
             *self.piece_bitboard_mut(PieceKind::Pawn) ^= origin.bitboard();
             *self.piece_bitboard_mut(to) ^= origin.bitboard();
-            *self.pieces.get_unchecked_mut(origin as usize) = Some(to);
+            unsafe {
+                *self.pieces.get_unchecked_mut(origin as usize) = Some(to);
+            }
             self.hash ^= zobrist::piece_hash(moving_kind, self.side_to_move, origin);
             self.hash ^= zobrist::piece_hash(to, self.side_to_move, origin);
             self.add_piece_feature(to, origin, self.side_to_move);
@@ -562,8 +566,10 @@ impl Position {
             moving_kind = to;
 
             if mv.is_capture() {
-                let Some(captured) = *self.pieces.get_unchecked(target as usize) else {
-                    unreachable_unchecked()
+                let captured = unsafe {
+                    self.pieces
+                        .get_unchecked(target as usize)
+                        .unwrap_unchecked()
                 };
                 *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
                 *self.piece_bitboard_mut(captured) ^= target.bitboard();
@@ -573,16 +579,20 @@ impl Position {
             self.reversible_moves = 0
         } else if mv.is_capture() {
             let target = if mv.special_0_is_set() {
-                target.translate_unchecked(if self.side_to_move.is_black() {
-                    Delta::North
-                } else {
-                    Delta::South
-                })
+                unsafe {
+                    target.translate_unchecked(if self.side_to_move.is_black() {
+                        Delta::North
+                    } else {
+                        Delta::South
+                    })
+                }
             } else {
                 target
             };
-            let Some(captured) = *self.pieces.get_unchecked(target as usize) else {
-                unreachable_unchecked()
+            let captured = unsafe {
+                self.pieces
+                    .get_unchecked(target as usize)
+                    .unwrap_unchecked()
             };
             *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
             *self.piece_bitboard_mut(captured) ^= target.bitboard();
@@ -604,8 +614,10 @@ impl Position {
             let rook_move = rook_origin.bitboard() | rook_target.bitboard();
             *self.piece_bitboard_mut(PieceKind::Rook) ^= rook_move;
             *self.color_bitboard_mut(self.side_to_move) ^= rook_move;
-            *self.pieces.get_unchecked_mut(rook_target as usize) =
-                self.pieces.get_unchecked_mut(rook_origin as usize).take();
+            unsafe {
+                *self.pieces.get_unchecked_mut(rook_target as usize) =
+                    self.pieces.get_unchecked_mut(rook_origin as usize).take();
+            }
             self.hash ^= zobrist::piece_hash(PieceKind::Rook, self.side_to_move, rook_origin);
             self.hash ^= zobrist::piece_hash(PieceKind::Rook, self.side_to_move, rook_target);
             self.add_piece_feature(PieceKind::Rook, rook_target, self.side_to_move);
@@ -624,8 +636,10 @@ impl Position {
         // Then make the actual move on the board
         *self.color_bitboard_mut(self.side_to_move) ^= move_bitboard;
         *self.piece_bitboard_mut(moving_kind) ^= move_bitboard;
-        *self.pieces.get_unchecked_mut(target as usize) =
-            self.pieces.get_unchecked_mut(origin as usize).take();
+        unsafe {
+            *self.pieces.get_unchecked_mut(target as usize) =
+                self.pieces.get_unchecked_mut(origin as usize).take();
+        }
         self.hash ^= zobrist::piece_hash(moving_kind, self.side_to_move, origin);
         self.hash ^= zobrist::piece_hash(moving_kind, self.side_to_move, target);
         self.add_piece_feature(moving_kind, target, self.side_to_move);
@@ -829,7 +843,9 @@ impl Position {
                         let pinned_square = unsafe { pin.lowest_set_square_unchecked() };
 
                         let Some(kind) = self.pieces[pinned_square as usize] else {
-                            panic!("Detected pin on {pinned_square} with ray\n{ray:?}\nbut there is no piece here\n{self}");
+                            panic!(
+                                "Detected pin on {pinned_square} with ray\n{ray:?}\nbut there is no piece here\n{self}"
+                            );
                         };
                         if kind.is_diagonal_slider() || kind == PieceKind::Pawn {
                             let movable_ray = (ray ^ pin) | origin.bitboard();
@@ -869,7 +885,9 @@ impl Position {
                         let pinned_square = unsafe { pin.lowest_set_square_unchecked() };
 
                         let Some(kind) = self.pieces[pinned_square as usize] else {
-                            panic!("Detected pin on {pinned_square} with ray\n{ray:?}\nbut there is no piece here\n{self}");
+                            panic!(
+                                "Detected pin on {pinned_square} with ray\n{ray:?}\nbut there is no piece here\n{self}"
+                            );
                         };
                         if kind.is_orthogonal_slider() || kind == PieceKind::Pawn {
                             let movable_ray = (ray ^ pin) | origin.bitboard();
@@ -1491,19 +1509,15 @@ impl std::fmt::Debug for Position {
                     _ => writeln!(f),
                 }?
             }
-            write!(
-                f,
-                "{} ",
-                match self.piece_on(square) {
-                    None => ".".to_string(),
-                    Some((kind, color)) =>
-                        if color.is_black() {
-                            kind.to_string()
-                        } else {
-                            kind.to_string().to_uppercase()
-                        },
-                }
-            )?
+            write!(f, "{} ", match self.piece_on(square) {
+                None => ".".to_string(),
+                Some((kind, color)) =>
+                    if color.is_black() {
+                        kind.to_string()
+                    } else {
+                        kind.to_string().to_uppercase()
+                    },
+            })?
         }
 
         writeln!(f, "\nfen: {}", self.fen())
