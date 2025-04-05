@@ -9,7 +9,7 @@
 
 use crate::{
     chess::square::Rank,
-    parsing::{PartialFromStr, parse_int, walk_whitespace},
+    parsing::{PartialFromStr, parse_u32, walk_whitespace},
 };
 
 use super::{
@@ -17,7 +17,7 @@ use super::{
     castling_rights::CastlingRights,
     colour::{Colour, NUM_COLOURS},
     piece::{NUM_PIECES, Piece, PieceKind},
-    square::Square,
+    square::{File, Square},
 };
 
 #[cfg(feature = "serde")]
@@ -64,7 +64,7 @@ pub struct Fen {
     pub(crate) bitboards: [Bitboard; NUM_COLOURS + NUM_PIECES],
     pub side_to_move: Colour,
     pub castling_rights: CastlingRights,
-    pub en_passant: Option<Square>,
+    pub en_passant_file: Option<File>,
     pub halfmove_clock: u16,
     pub fullmove_counter: u16,
 }
@@ -283,21 +283,26 @@ impl PartialFromStr for Fen {
             .map_err(|_| FenParseError::InvalidCastlingRights)?;
 
         let s = walk_whitespace(s);
-        let (en_passant, s) = match s.chars().next() {
+        let (en_passant_file, s) = match s.chars().next() {
             Some('-') => (None, &s[1..]),
             Some(_) => {
-                // TODO error invalid ep square
-                let (sq, s) = Square::partial_from_str(s).unwrap();
-                (Some(sq), s)
+                let (sq, s) = Square::partial_from_str(s)
+                    .map_err(|_| FenParseError::InvalidEnPassantSquare)?;
+                if (side_to_move.is_black() && sq.rank() != Rank::Three)
+                    || (side_to_move.is_white() && sq.rank() != Rank::Six)
+                {
+                    return Err(FenParseError::InvalidEnPassantSquare);
+                }
+                (Some(sq.file()), s)
             }
             None => Err(FenParseError::Incomplete("En passant target"))?,
         };
 
-        let (halfmove_clock, s) = match parse_int(walk_whitespace(s)) {
+        let (halfmove_clock, s) = match parse_u32(walk_whitespace(s)) {
             Ok((h, s)) => (h, s),
             Err(_) => (0, s),
         };
-        let (fullmove_counter, s) = match parse_int(walk_whitespace(s)) {
+        let (fullmove_counter, s) = match parse_u32(walk_whitespace(s)) {
             Ok((f, s)) => (f, s),
             Err(_) => (0, s),
         };
@@ -306,7 +311,7 @@ impl PartialFromStr for Fen {
             Self {
                 bitboards,
                 side_to_move,
-                en_passant,
+                en_passant_file,
                 castling_rights,
                 halfmove_clock,
                 fullmove_counter,
@@ -372,8 +377,16 @@ impl std::fmt::Debug for Fen {
                 'w'
             },
             self.castling_rights,
-            if let Some(ep) = self.en_passant {
-                ep.to_string()
+            if let Some(ep_file) = self.en_passant_file {
+                Square::new(
+                    ep_file,
+                    if self.side_to_move.is_black() {
+                        Rank::Three
+                    } else {
+                        Rank::Six
+                    },
+                )
+                .to_string()
             } else {
                 String::from("-")
             },

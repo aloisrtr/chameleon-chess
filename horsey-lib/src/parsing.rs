@@ -76,13 +76,13 @@ pub(crate) fn parse_string(src: &str) -> Result<(String, &str), ()> {
     Ok((result, left))
 }
 
-/// Parses a a u16 value.
-pub(crate) fn parse_int(src: &str) -> Result<(u16, &str), ()> {
-    let mut result = 0u16;
+/// Parses a a u32 value.
+pub(crate) fn parse_u32(src: &str) -> Result<(u32, &str), ()> {
+    let mut result = 0u32;
     let mut parsed = 0;
     for c in src.chars() {
         if let Some(digit) = c.to_digit(10) {
-            result = result * 10 + digit as u16;
+            result = result * 10 + digit;
             parsed += 1
         } else {
             break;
@@ -95,8 +95,17 @@ pub(crate) fn parse_int(src: &str) -> Result<(u16, &str), ()> {
         Err(())
     }
 }
+/// Parses a i32 value.
+pub(crate) fn parse_i32(src: &str) -> Result<(i32, &str), ()> {
+    match src.chars().next() {
+        Some('-') => parse_u32(&src[1..]).map(|(i, left)| (-(i as i32), left)),
+        Some('+') => parse_u32(&src[1..]).map(|(i, left)| (i as i32, left)),
+        Some(c) if c.is_ascii_digit() => parse_u32(&src[1..]).map(|(i, left)| (i as i32, left)),
+        _ => Err(()),
+    }
+}
 
 /// Returns the rest of the input after walking whitespace values.
-pub fn walk_whitespace(src: &str) -> &str {
+pub(crate) fn walk_whitespace(src: &str) -> &str {
     src.trim_start()
 }

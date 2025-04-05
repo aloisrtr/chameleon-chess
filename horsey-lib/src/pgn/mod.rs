@@ -198,7 +198,7 @@ impl PartialFromStr for PgnMoveText {
             }
             match s.chars().next() {
                 Some(c) if c.is_digit(10) => {
-                    let (move_num, left) = parse_int(s).unwrap();
+                    let (move_num, left) = parse_u32(s).unwrap();
                     s = left;
                     current_move_number = (move_num - 1) * 2
                 }
@@ -222,7 +222,7 @@ impl PartialFromStr for PgnMoveText {
                     s = &s[1..];
                 }
                 Some('$') => {
-                    let Ok((nag, left)) = parse_int(&s[1..]) else {
+                    let Ok((nag, left)) = parse_u32(&s[1..]) else {
                         break;
                     };
                     s = left;

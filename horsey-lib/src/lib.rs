@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub mod brain;
 pub mod chess;
+pub mod epd;
 pub mod parsing;
 pub mod pgn;
 pub mod search;
