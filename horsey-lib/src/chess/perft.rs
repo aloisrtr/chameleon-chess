@@ -192,7 +192,7 @@ mod test {
     fn kiwipete_perft() {
         check_matching(
             &mut Position::from_fen(
-                &"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - "
+                &"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -"
                     .parse()
                     .unwrap(),
             ),
@@ -204,7 +204,7 @@ mod test {
     #[ignore]
     fn endgame_perft() {
         check_matching(
-            &mut Position::from_fen(&"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - ".parse().unwrap()),
+            &mut Position::from_fen(&"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -".parse().unwrap()),
             &[
                 14, 191, 2812, 43238, 674624, 11030083, 178633661, 3009794393,
             ],

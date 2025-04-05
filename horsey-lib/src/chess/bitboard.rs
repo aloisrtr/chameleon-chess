@@ -3,7 +3,7 @@
 
 use std::iter::FusedIterator;
 
-use super::square::{Delta, Square};
+use super::square::{Delta, Rank, Square};
 
 /// Bitboards are data structures used to efficiently represent the board state.
 ///
@@ -567,11 +567,11 @@ impl ExactSizeIterator for Bitboard {
 
 impl std::fmt::Debug for Bitboard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (i, square) in Square::squares_fen_iter().enumerate() {
-            if i % 8 == 0 && i != 0 {
-                writeln!(f)?
+        for rank in Rank::iter().rev() {
+            for square in Square::rank_squares_iter(rank) {
+                write!(f, "{} ", if self.is_set(square) { 'x' } else { '.' })?
             }
-            write!(f, "{} ", if self.is_set(square) { 'x' } else { '.' })?
+            writeln!(f)?
         }
         Ok(())
     }

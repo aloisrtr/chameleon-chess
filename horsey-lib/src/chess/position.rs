@@ -14,7 +14,7 @@ use super::{
     fen::Fen,
     history::HistoryEntry,
     magic_tables::*,
-    piece::PieceKind,
+    piece::{Piece, PieceKind},
     square::{Delta, File, Rank, Square},
     zobrist,
 };
@@ -156,7 +156,7 @@ impl Position {
     /// Creates a position from a parsed FEN string.
     pub fn from_fen(fen: &Fen) -> Self {
         let mut pieces = [None; 64];
-        for sq in Square::squares_fen_iter() {
+        for sq in Square::squares_iter() {
             pieces[sq as usize] = fen.piece_on(sq).map(|p| p.kind);
         }
 
@@ -212,8 +212,11 @@ impl Position {
         kind: PieceKind,
         colour: Colour,
     ) -> Result<(), PlaceError> {
-        if let Some((kind, colour)) = self.piece_on(on) {
-            return Err(PlaceError::SquareOccupied { kind, colour });
+        if let Some(p) = self.piece_on(on) {
+            return Err(PlaceError::SquareOccupied {
+                kind: p.kind,
+                colour: p.colour,
+            });
         }
         if kind == PieceKind::King {
             return Err(PlaceError::TooManyKings(colour));
@@ -240,16 +243,14 @@ impl Position {
     }
 
     /// Returns the piece kind and color present on a given square if any.
-    pub fn piece_on(&self, square: Square) -> Option<(PieceKind, Colour)> {
+    pub fn piece_on(&self, square: Square) -> Option<Piece> {
         self.pieces[square as usize].map(|kind| {
-            (
-                kind,
-                if self.color_bitboard(Colour::Black).is_set(square) {
-                    Colour::Black
-                } else {
-                    Colour::White
-                },
-            )
+            let colour = if self.color_bitboard(Colour::Black).is_set(square) {
+                Colour::Black
+            } else {
+                Colour::White
+            };
+            Piece::new(kind, colour)
         })
     }
 
@@ -389,7 +390,7 @@ impl Position {
             return None;
         }
 
-        let (moving_piece, _) = self.piece_on(action.origin())?;
+        let moving_piece = self.piece_on(action.origin())?.kind;
         let move_kind = if action.is_kingside_castle() {
             SanMoveKind::KingSideCastle
         } else if action.is_queenside_castle() {
@@ -413,7 +414,7 @@ impl Position {
                 .into_iter()
                 .filter_map(|a| {
                     if a.target() == action.target()
-                        && self.piece_on(a.origin()).unwrap().0 == moving_piece
+                        && self.piece_on(a.origin()).unwrap().kind == moving_piece
                         && a.origin() != action.origin()
                     {
                         Some(a.origin())
@@ -1440,8 +1441,8 @@ impl Position {
     fn rehash(&mut self) {
         self.hash = 0;
         for sq in Square::squares_iter() {
-            if let Some((kind, colour)) = self.piece_on(sq) {
-                self.hash ^= zobrist::piece_hash(kind, colour, sq)
+            if let Some(p) = self.piece_on(sq) {
+                self.hash ^= zobrist::piece_hash(p.kind, p.colour, sq)
             }
         }
 
@@ -1482,44 +1483,38 @@ impl Into<Fen> for &Position {
 }
 impl std::fmt::Debug for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (i, square) in Square::squares_fen_iter().enumerate() {
-            if i % 8 == 0 && i != 0 {
-                match i / 8 {
-                    3 => writeln!(
-                        f,
-                        "side to move: {}",
-                        if self.side_to_move == Colour::Black {
-                            "black"
-                        } else {
-                            "white"
-                        }
-                    ),
-                    4 => writeln!(f, "reversible moves: {}", self.reversible_moves),
-                    5 => writeln!(
-                        f,
-                        "en passant: {}",
-                        if let Some(file) = self.en_passant_file {
-                            file.to_string()
-                        } else {
-                            "-".to_string()
-                        }
-                    ),
-                    6 => writeln!(f, "castling rights: {}", self.castling_rights),
-                    7 => writeln!(f, "hash: {:#0x}", self.hash),
-                    _ => writeln!(f),
-                }?
+        for (r, rank) in Rank::iter().rev().enumerate() {
+            for sq in Square::rank_squares_iter(rank) {
+                write!(f, "{} ", match self.piece_on(sq) {
+                    None => ".".to_string(),
+                    Some(p) => p.to_string(),
+                })?
             }
-            write!(f, "{} ", match self.piece_on(square) {
-                None => ".".to_string(),
-                Some((kind, color)) =>
-                    if color.is_black() {
-                        kind.to_string()
+            match r {
+                3 => writeln!(
+                    f,
+                    "side to move: {}",
+                    if self.side_to_move.is_black() {
+                        "black"
                     } else {
-                        kind.to_string().to_uppercase()
-                    },
-            })?
+                        "white"
+                    }
+                ),
+                4 => writeln!(f, "reversible moves: {}", self.reversible_moves),
+                5 => writeln!(
+                    f,
+                    "en passant: {}",
+                    if let Some(file) = self.en_passant_file {
+                        file.to_string()
+                    } else {
+                        "-".to_string()
+                    }
+                ),
+                6 => writeln!(f, "castling rights: {}", self.castling_rights),
+                7 => writeln!(f, "hash: {:#0x}", self.hash),
+                _ => writeln!(f),
+            }?
         }
-
         writeln!(f, "\nfen: {}", self.fen())
     }
 }

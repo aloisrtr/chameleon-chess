@@ -174,7 +174,7 @@ impl FromStr for CastlingRights {
     // TODO: better error
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::partial_from_str(s).and_then(|(r, s)| if s.is_empty() { Err(()) } else { Ok(r) })
+        Self::partial_from_str(s).and_then(|(r, s)| if s.is_empty() { Ok(r) } else { Err(()) })
     }
 }
 impl std::fmt::Display for CastlingRights {

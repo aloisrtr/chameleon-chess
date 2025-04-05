@@ -221,7 +221,8 @@ impl PartialFromStr for Fen {
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
         fn parse_piece_section(mut s: &str) -> Result<([Bitboard; 8], &str), FenError> {
             let mut bitboards = [Bitboard::empty(); 8];
-            let mut squares = Square::squares_fen_iter();
+            let mut ranks = Rank::iter().rev();
+            let mut squares = Square::rank_squares_iter(ranks.next().unwrap());
             while let Some(c) = s.chars().next() {
                 if let Some(digit) = c.to_digit(10) {
                     for _ in 0..digit {
@@ -229,8 +230,18 @@ impl PartialFromStr for Fen {
                     }
                     s = &s[1..];
                 } else if c == '/' {
+                    if squares.next().is_some() {
+                        // TODO: better error
+                        return Err(FenError::IncompletePieceSection(0));
+                    }
+                    squares = if let Some(rank) = ranks.next() {
+                        Square::rank_squares_iter(rank)
+                    } else {
+                        // TODO: same here
+                        return Err(FenError::ParseError);
+                    };
+
                     s = &s[1..];
-                    squares.next();
                 } else if c == ' ' {
                     break;
                 } else {
@@ -251,7 +262,8 @@ impl PartialFromStr for Fen {
 
         let (bitboards, s) = parse_piece_section(s)?;
 
-        let side_to_move = match walk_whitespace(s).chars().next() {
+        let s = walk_whitespace(s);
+        let side_to_move = match s.chars().next() {
             Some('w') => Colour::White,
             Some('b') => Colour::Black,
             _ => Err(FenError::Incomplete("Side to play"))?,
@@ -273,8 +285,14 @@ impl PartialFromStr for Fen {
         };
 
         // TODO: check errors here
-        let (halfmove_clock, s) = parse_int(walk_whitespace(s)).unwrap();
-        let (fullmove_counter, s) = parse_int(walk_whitespace(s)).unwrap();
+        let (halfmove_clock, s) = match parse_int(walk_whitespace(s)) {
+            Ok((h, s)) => (h, s),
+            Err(_) => (0, s),
+        };
+        let (fullmove_counter, s) = match parse_int(walk_whitespace(s)) {
+            Ok((f, s)) => (f, s),
+            Err(_) => (0, s),
+        };
 
         Ok((
             Self {
@@ -312,25 +330,27 @@ impl std::fmt::Debug for Fen {
         // Pieces
         let mut skip = 0;
         let mut line_length = 0;
-        for sq in Square::squares_fen_iter() {
-            if let Some(p) = self.piece_on(sq) {
-                if skip != 0 {
-                    write!(f, "{skip}")?;
-                    skip = 0
+        for rank in Rank::iter().rev() {
+            for sq in Square::rank_squares_iter(rank) {
+                if let Some(p) = self.piece_on(sq) {
+                    if skip != 0 {
+                        write!(f, "{skip}")?;
+                        skip = 0
+                    }
+                    write!(f, "{p}")?;
+                } else {
+                    skip += 1
                 }
-                write!(f, "{p}")?;
-            } else {
-                skip += 1
-            }
 
-            line_length = (line_length + 1) % 8;
-            if line_length == 0 {
-                if skip != 0 {
-                    write!(f, "{skip}")?;
-                    skip = 0;
-                }
-                if sq.rank() != Rank::One {
-                    write!(f, "/")?
+                line_length = (line_length + 1) % 8;
+                if line_length == 0 {
+                    if skip != 0 {
+                        write!(f, "{skip}")?;
+                        skip = 0;
+                    }
+                    if sq.rank() != Rank::One {
+                        write!(f, "/")?
+                    }
                 }
             }
         }

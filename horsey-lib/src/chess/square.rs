@@ -1,4 +1,6 @@
 //! Enumerations of chessboard accessing constants, such as files, ranks and squares.
+use std::iter::FusedIterator;
+
 use thiserror::Error;
 
 use crate::parsing::PartialFromStr;
@@ -76,6 +78,21 @@ impl File {
     /// ```
     pub fn as_index(self) -> u8 {
         self as u8
+    }
+
+    /// Iterator over all files, from left to right.
+    pub fn iter() -> std::array::IntoIter<File, 8> {
+        [
+            File::A,
+            File::B,
+            File::C,
+            File::D,
+            File::E,
+            File::F,
+            File::G,
+            File::H,
+        ]
+        .into_iter()
     }
 }
 impl std::ops::Add<Delta> for File {
@@ -233,6 +250,21 @@ impl Rank {
     /// ```
     pub fn as_index(self) -> u8 {
         self as u8
+    }
+
+    /// Iterator over all ranks, from bottom to top.
+    pub fn iter() -> std::array::IntoIter<Rank, 8> {
+        [
+            Rank::One,
+            Rank::Two,
+            Rank::Three,
+            Rank::Four,
+            Rank::Five,
+            Rank::Six,
+            Rank::Seven,
+            Rank::Eight,
+        ]
+        .into_iter()
     }
 }
 impl std::ops::Add<Delta> for Rank {
@@ -507,20 +539,28 @@ impl Square {
     }
 
     /// An iterator over all squares, ordered from A1 to H8.
-    pub fn squares_iter() -> impl Iterator<Item = Self> {
+    pub fn squares_iter() -> std::array::IntoIter<Self, 64> {
         Square::SQUARES.into_iter()
     }
 
-    /// An iterator over all square, ordered in big-endian rank/little-endian file
-    /// (equivalent to how squares are ordered in a FEN string).
-    pub fn squares_fen_iter() -> impl Iterator<Item = Self> {
-        (0..8).rev().flat_map(|rank| {
-            (0..8).map(move |file| unsafe {
-                let rank = Rank::from_index_unchecked(rank);
-                let file = File::from_index_unchecked(file);
-                Square::new(file, rank)
-            })
-        })
+    /// An iterator over all squares in a single file, from bottom to top.
+    pub fn file_squares_iter(
+        file: File,
+    ) -> impl Iterator<Item = Self>
+    + DoubleEndedIterator<Item = Self>
+    + ExactSizeIterator<Item = Self>
+    + FusedIterator<Item = Self> {
+        Rank::iter().map(move |rank| Square::new(file, rank))
+    }
+
+    /// An iterator over all squares in a single rank, from left to right.
+    pub fn rank_squares_iter(
+        rank: Rank,
+    ) -> impl Iterator<Item = Self>
+    + DoubleEndedIterator<Item = Self>
+    + ExactSizeIterator<Item = Self>
+    + FusedIterator<Item = Self> {
+        File::iter().map(move |file| Square::new(file, rank))
     }
 
     /// Returns a bitboard containing only this square.
@@ -533,6 +573,11 @@ impl std::ops::Add<Delta> for Square {
     type Output = Square;
 
     fn add(self, rhs: Delta) -> Self::Output {
+        let index = (self as u8).wrapping_add_signed(rhs as i8);
+        assert!(
+            (0..64).contains(&index),
+            "Cannot apply delta {rhs:?} to square {self}"
+        );
         unsafe { std::mem::transmute((self as u8).wrapping_add_signed(rhs as i8)) }
     }
 }
@@ -545,6 +590,11 @@ impl std::ops::Sub<Delta> for Square {
     type Output = Square;
 
     fn sub(self, rhs: Delta) -> Self::Output {
+        let index = (self as u8).wrapping_add_signed(-(rhs as i8));
+        assert!(
+            (0..64).contains(&index),
+            "Cannot apply negative delta {rhs:?} to square {self}"
+        );
         unsafe { std::mem::transmute((self as u8).wrapping_add_signed(-(rhs as i8))) }
     }
 }
