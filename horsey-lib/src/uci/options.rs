@@ -2,15 +2,22 @@
 
 use std::convert::Infallible;
 
-use thiserror::Error;
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Error)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum UciOptionAssignError {
-    #[error("Mismatched type: expected {expected}, got {got}")]
     MismatchedTypes { expected: String, got: String },
-    #[error("Value is out of range")]
     OutOfRange,
 }
+impl std::fmt::Display for UciOptionAssignError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MismatchedTypes { expected, got } => {
+                write!(f, "Mismatched types: expected {expected}, got {got}")
+            }
+            Self::OutOfRange => write!(f, "Value out of range"),
+        }
+    }
+}
+impl std::error::Error for UciOptionAssignError {}
 
 /// The different types of UCI fields available.
 #[derive(Clone, PartialEq, Eq, Debug)]

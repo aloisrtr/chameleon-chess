@@ -2,8 +2,6 @@
 
 use std::str::FromStr;
 
-use thiserror::Error;
-
 use crate::parsing::PartialFromStr;
 
 use super::colour::Colour;
@@ -70,15 +68,23 @@ impl std::fmt::Display for Piece {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum PieceParseError {
-    #[error("{0} is not a valid piece symbol")]
     InvalidPieceSymbol(char),
-    #[error("Empty input")]
     EmptyInput,
-    #[error("A piece can only be one character")]
     InputTooLong,
 }
+impl std::fmt::Display for PieceParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPieceSymbol(c) => write!(f, "{c} is not a valid piece symbol"),
+            Self::EmptyInput => write!(f, "Empty input"),
+            Self::InputTooLong => write!(f, "A piece can only be one character long"),
+        }
+    }
+}
+impl std::error::Error for PieceParseError {}
+
 impl PartialFromStr for Piece {
     type Err = PieceParseError;
 
@@ -274,17 +280,25 @@ impl From<PromotionTarget> for PieceKind {
         unsafe { std::mem::transmute(value) }
     }
 }
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum PromotionTargetParseError {
-    #[error("{0} is not a valid promotion target")]
     InvalidPromotionTarget(PieceKind),
-    #[error("{0} is not a valid piece symbol")]
     InvalidPieceSymbol(char),
-    #[error("Empty input")]
     EmptyInput,
-    #[error("A piece can only be one character")]
     InputTooLong,
 }
+impl std::fmt::Display for PromotionTargetParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPromotionTarget(p) => write!(f, "{p} is not a valid promotion target"),
+            Self::InvalidPieceSymbol(c) => write!(f, "{c} is not a valid piece symbol"),
+            Self::EmptyInput => write!(f, "Empty input"),
+            Self::InputTooLong => write!(f, "A piece can only be one character long"),
+        }
+    }
+}
+impl std::error::Error for PromotionTargetParseError {}
+
 impl PartialFromStr for PromotionTarget {
     type Err = PromotionTargetParseError;
 

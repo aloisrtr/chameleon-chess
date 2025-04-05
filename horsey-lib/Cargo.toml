@@ -7,7 +7,6 @@ license = "AGPL-3.0-only"
 description = "Efficient and complete chess library."
 
 [dependencies]
-thiserror = { version = "2.0", default-features = false }
 rand = { version = "0.9", default-features = false, features = ["small_rng"] }
 log = { version = "0.4", default-features = false, optional = true }
 num_cpus = { version = "1.16", default-features = false }

@@ -4,8 +4,6 @@
 
 use std::fmt::{Arguments, Write};
 
-use thiserror::Error;
-
 use crate::parsing::*;
 
 use super::chess::{
@@ -57,17 +55,24 @@ impl PartialOrd for PgnTagPair {
     }
 }
 
-#[derive(Debug, Clone, Copy, Error, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PgnTagPairParseError {
-    #[error("Missing opening bracket")]
     MissingOpeningBracket,
-    #[error("Invalid tag")]
     InvalidTag,
-    #[error("Invalid value")]
     InvalidValue,
-    #[error("Missing closing bracket")]
     MissingClosingBracket,
 }
+impl std::fmt::Display for PgnTagPairParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingOpeningBracket => write!(f, "Missing opening bracket"),
+            Self::InvalidTag => write!(f, "Invalid tag"),
+            Self::InvalidValue => write!(f, "Invalid value"),
+            Self::MissingClosingBracket => write!(f, "Missing closing bracket"),
+        }
+    }
+}
+impl std::error::Error for PgnTagPairParseError {}
 
 impl PartialFromStr for PgnTagPair {
     type Err = PgnTagPairParseError;
@@ -147,21 +152,35 @@ impl PgnMoveText {
     }
 }
 
-#[derive(Debug, Clone, Copy, Error, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PgnMoveTextParseError {
-    #[error("Incoherent move numbering: parent is {expected}, child is {got}")]
     IncoherentMoveNumbering { expected: u16, got: u16 },
-    #[error("Recursive Annotation Variation started without root")]
     RavWithoutRoot,
-    #[error("Recursive Annotation Variation ended, but never started")]
     EndedNonStartedRav,
-    #[error("Numeric Anotation Glyph with no parent move")]
     NagWithNoParentMove,
-    #[error("Invalid character for PGN movetext: {0}")]
     InvalidCharacter(char),
-    #[error("Missing game result in PGN movetext")]
     MissingGameResult,
 }
+impl std::fmt::Display for PgnMoveTextParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IncoherentMoveNumbering { expected, got } => write!(
+                f,
+                "Incoherent move numbering: parent is {expected}, child is {got}"
+            ),
+            Self::RavWithoutRoot => {
+                write!(f, "Recursive Annotation Variation started without root")
+            }
+            Self::EndedNonStartedRav => {
+                write!(f, "Recursive Annotation Variation ended, but never started")
+            }
+            Self::NagWithNoParentMove => write!(f, "Numeric Annotation Glyph with no parent move"),
+            Self::InvalidCharacter(c) => write!(f, "Invalid character for PGN movetext: {c}"),
+            Self::MissingGameResult => write!(f, "Missing game result in PGN movetext"),
+        }
+    }
+}
+impl std::error::Error for PgnMoveTextParseError {}
 
 impl PartialFromStr for PgnMoveText {
     type Err = PgnMoveTextParseError;
@@ -339,19 +358,28 @@ pub struct PgnGame {
     tags: Vec<PgnTagPair>,
     movetext: PgnMoveText,
 }
-#[derive(Debug, Clone, Copy, Error, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PgnGameParseError {
-    #[error(transparent)]
-    TagPairsError(#[from] PgnTagPairParseError),
-    #[error(transparent)]
-    MovetextError(#[from] PgnMoveTextParseError),
+    TagPairsError(PgnTagPairParseError),
+    MovetextError(PgnMoveTextParseError),
 }
+impl std::fmt::Display for PgnGameParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TagPairsError(e) => write!(f, "{e}"),
+            Self::MovetextError(e) => write!(f, "{e}"),
+        }
+    }
+}
+impl std::error::Error for PgnGameParseError {}
+
 impl PartialFromStr for PgnGame {
     type Err = PgnGameParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
-        let (tags, s) = parse_tag_pairs(s)?;
-        let (movetext, s) = PgnMoveText::partial_from_str(s)?;
+        let (tags, s) = parse_tag_pairs(s).map_err(|e| PgnGameParseError::TagPairsError(e))?;
+        let (movetext, s) =
+            PgnMoveText::partial_from_str(s).map_err(|e| PgnGameParseError::MovetextError(e))?;
         Ok((Self { tags, movetext }, s))
     }
 }

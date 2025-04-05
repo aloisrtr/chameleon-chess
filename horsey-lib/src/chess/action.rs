@@ -9,8 +9,6 @@
 //! Checking for legality is deffered to the conversion to the internal move representation
 //! by a [`Position`] object.
 
-use thiserror::Error;
-
 use crate::parsing::PartialFromStr;
 
 use super::{
@@ -310,15 +308,23 @@ impl std::fmt::Display for UciMove {
 }
 
 /// Errors that may arise when parsing UCI moves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UciParseError {
-    #[error("Invalid origin square: {0}")]
     InvalidOriginSquare(SquareParseError),
-    #[error("Invalid target square: {0}")]
     InvalidTargetSquare(SquareParseError),
-    #[error("A UCI move can only be up to 5 characters long")]
     InputTooLong,
 }
+impl std::fmt::Display for UciParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidOriginSquare(e) => write!(f, "Invalid origin square: {e}"),
+            Self::InvalidTargetSquare(e) => write!(f, "Invalid target square: {e}"),
+            Self::InputTooLong => write!(f, "A UCI move can only be up to 5 characters long"),
+        }
+    }
+}
+impl std::error::Error for UciParseError {}
+
 impl PartialFromStr for UciMove {
     type Err = UciParseError;
 
@@ -479,19 +485,30 @@ impl std::fmt::Display for SanMove {
 }
 
 /// Errors that may arise when parsing SAN moves.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Error)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum SanParseError {
-    #[error("Invalid origin file: {0}")]
-    InvalidOriginFile(#[from] FileParseError),
-    #[error("Invalid origin rank: {0}")]
-    InvalidOriginRank(#[from] RankParseError),
-    #[error("Invalid target square: {0}")]
-    InvalidTargetSquare(#[from] SquareParseError),
-    #[error("Cannot promote {0}")]
+    InvalidOriginFile(FileParseError),
+    InvalidOriginRank(RankParseError),
+    InvalidTargetSquare(SquareParseError),
     PromotingNonPawnPiece(PieceKind),
-    #[error("Some part of the input was left after parsing a SAN move")]
     InputTooLong,
 }
+impl std::fmt::Display for SanParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidOriginFile(e) => write!(f, "Invalid origin file: {e}"),
+            Self::InvalidOriginRank(e) => write!(f, "Invalid origin rank: {e}"),
+            Self::InvalidTargetSquare(e) => write!(f, "Invalid target square: {e}"),
+            Self::PromotingNonPawnPiece(p) => write!(f, "Cannot promote {p}"),
+            Self::InputTooLong => write!(
+                f,
+                "Some part of the input was left after parsing a SAN move"
+            ),
+        }
+    }
+}
+impl std::error::Error for SanParseError {}
+
 impl PartialFromStr for SanMove {
     type Err = SanParseError;
 

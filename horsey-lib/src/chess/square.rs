@@ -1,8 +1,6 @@
 //! Enumerations of chessboard accessing constants, such as files, ranks and squares.
 use std::iter::FusedIterator;
 
-use thiserror::Error;
-
 use crate::parsing::PartialFromStr;
 
 use super::bitboard::Bitboard;
@@ -136,15 +134,23 @@ impl std::fmt::Display for File {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum FileParseError {
-    #[error("{0} does not denote a valid chessboard file")]
     InvalidFileSymbol(char),
-    #[error("Cannot parse a file from an empty input")]
     EmptyInput,
-    #[error("A file cannot be more than one character")]
     InputTooLong,
 }
+impl std::fmt::Display for FileParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidFileSymbol(c) => write!(f, "{c} does not denote a valid chessboard file"),
+            Self::EmptyInput => write!(f, "Cannot parse a file from an empty input"),
+            Self::InputTooLong => write!(f, "A file cannot be more than one character"),
+        }
+    }
+}
+impl std::error::Error for FileParseError {}
+
 impl PartialFromStr for File {
     type Err = FileParseError;
 
@@ -299,15 +305,23 @@ impl std::fmt::Display for Rank {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Error)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum RankParseError {
-    #[error("{0} does not denote a valid chessboard rank")]
     InvalidRankSymbol(char),
-    #[error("Cannot parse a rank from an empty input")]
     EmptyInput,
-    #[error("A rank cannot be more than one character")]
     InputTooLong,
 }
+impl std::fmt::Display for RankParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRankSymbol(c) => write!(f, "{c} does not denote a valid chessboard rank"),
+            Self::EmptyInput => write!(f, "Cannot parse a file from an empty input"),
+            Self::InputTooLong => write!(f, "A file cannot be more than one character"),
+        }
+    }
+}
+impl std::error::Error for RankParseError {}
+
 impl PartialFromStr for Rank {
     type Err = RankParseError;
 
@@ -609,21 +623,29 @@ impl std::fmt::Display for Square {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Debug, Error)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Debug)]
 pub enum SquareParseError {
-    #[error(transparent)]
-    InvalidFile(#[from] FileParseError),
-    #[error(transparent)]
-    InvalidRank(#[from] RankParseError),
-    #[error("A square cannot be more than two characters long")]
+    InvalidFile(FileParseError),
+    InvalidRank(RankParseError),
     InputTooLong,
 }
+impl std::fmt::Display for SquareParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidFile(e) => write!(f, "Invalid file: {e}"),
+            Self::InvalidRank(e) => write!(f, "Invalid rank: {e}"),
+            Self::InputTooLong => write!(f, "A square cannot be more than two characters long"),
+        }
+    }
+}
+impl std::error::Error for SquareParseError {}
+
 impl PartialFromStr for Square {
     type Err = SquareParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
-        let (file, s) = File::partial_from_str(s)?;
-        let (rank, s) = Rank::partial_from_str(s)?;
+        let (file, s) = File::partial_from_str(s).map_err(|e| SquareParseError::InvalidFile(e))?;
+        let (rank, s) = Rank::partial_from_str(s).map_err(|e| SquareParseError::InvalidRank(e))?;
         Ok((Square::new(file, rank), s))
     }
 }

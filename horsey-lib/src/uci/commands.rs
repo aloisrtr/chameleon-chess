@@ -1,8 +1,6 @@
 //! # UCI Commands/Messages
 //! These are commands/messages that can be sent to another UCI compatible program.
 
-use thiserror::Error;
-
 use crate::chess::{
     action::{Action, UciMove},
     fen::Fen,
@@ -15,20 +13,29 @@ use super::{
     search::UciSearchParameters,
 };
 
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Clone)]
 pub enum UciError<'a> {
-    #[error("Unknown command verb: {0}")]
     UnknownCommandVerb(Cow<'a, str>),
-    #[error("Empty command")]
     EmptyCommand,
-    #[error("Missing parameter: {0}")]
     MissingParameter(&'static str),
-    #[error("Invalid parameter: expected {expected}, got {got}")]
     InvalidParameter {
         got: Cow<'a, str>,
         expected: &'static str,
     },
 }
+impl<'a> std::fmt::Display for UciError<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownCommandVerb(s) => write!(f, "Unknown command verb: {s}"),
+            Self::EmptyCommand => write!(f, "Empty command"),
+            Self::MissingParameter(s) => write!(f, "Missing parameter: {s}"),
+            Self::InvalidParameter { got, expected } => {
+                write!(f, "Invalid parameter: expected {expected}, got {got}")
+            }
+        }
+    }
+}
+impl std::error::Error for UciError<'_> {}
 
 /// Commands that can be received by the client (engine) from the server.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -178,7 +185,7 @@ impl<'a> std::str::FromStr for UciCommand<'a> {
                                     got: Cow::Borrowed("later"),
                                     expected: "cannot use later with name and/or code",
                                 })
-                            }
+                            };
                         }
                         "name" => {
                             name = Some(String::new());
@@ -274,64 +281,132 @@ impl<'a> std::str::FromStr for UciCommand<'a> {
                     match token {
                         "searchmoves" => {
                             let mut moves = vec![];
-                            while let Some(token) = tokens.next_if(|t| matches!(*t, "ponder" | "wtime" | "btime" | "winc" | "binc" | "movestogo" | "depth" | "nodes" | "mate" | "movetime" | "infinite" | "searchmoves")) {
-                                let m = token.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(token.to_string()), expected: "move" })?;
+                            while let Some(token) = tokens.next_if(|t| {
+                                matches!(
+                                    *t,
+                                    "ponder"
+                                        | "wtime"
+                                        | "btime"
+                                        | "winc"
+                                        | "binc"
+                                        | "movestogo"
+                                        | "depth"
+                                        | "nodes"
+                                        | "mate"
+                                        | "movetime"
+                                        | "infinite"
+                                        | "searchmoves"
+                                )
+                            }) {
+                                let m = token.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(token.to_string()),
+                                    expected: "move",
+                                })?;
                                 moves.push(m);
                             }
                             params = params.with_available_moves(&moves)
                         }
-                        "ponder" => {
-                            params = params.set_ponder(true)
-                        }
+                        "ponder" => params = params.set_ponder(true),
                         "wtime" => {
-                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
-                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            let time_str = tokens
+                                .next()
+                                .ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time =
+                                time_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(time_str.to_string()),
+                                    expected: "time as ms",
+                                })?;
                             params = params.with_white_time(Duration::from_millis(time))
                         }
                         "btime" => {
-                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
-                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            let time_str = tokens
+                                .next()
+                                .ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time =
+                                time_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(time_str.to_string()),
+                                    expected: "time as ms",
+                                })?;
                             params = params.with_black_time(Duration::from_millis(time))
                         }
                         "winc" => {
-                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
-                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            let time_str = tokens
+                                .next()
+                                .ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time =
+                                time_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(time_str.to_string()),
+                                    expected: "time as ms",
+                                })?;
                             params = params.with_white_increment(Duration::from_millis(time))
                         }
                         "binc" => {
-                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
-                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            let time_str = tokens
+                                .next()
+                                .ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time =
+                                time_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(time_str.to_string()),
+                                    expected: "time as ms",
+                                })?;
                             params = params.with_black_increment(Duration::from_millis(time))
                         }
                         "movestogo" => {
-                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
-                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            let int_str =
+                                tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value =
+                                int_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(int_str.to_string()),
+                                    expected: "integer",
+                                })?;
                             params = params.with_moves_until_time_control(value);
                         }
                         "depth" => {
-                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
-                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            let int_str =
+                                tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value =
+                                int_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(int_str.to_string()),
+                                    expected: "integer",
+                                })?;
                             params = params.with_depth(value);
                         }
                         "nodes" => {
-                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
-                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            let int_str =
+                                tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value =
+                                int_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(int_str.to_string()),
+                                    expected: "integer",
+                                })?;
                             params = params.with_nodes(value);
                         }
                         "mate" => {
-                            let int_str = tokens.next().ok_or(UciError::MissingParameter("integer"))?;
-                            let value = int_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(int_str.to_string()), expected: "integer" })?;
+                            let int_str =
+                                tokens.next().ok_or(UciError::MissingParameter("integer"))?;
+                            let value =
+                                int_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(int_str.to_string()),
+                                    expected: "integer",
+                                })?;
                             params = params.with_distance_to_mate(value);
                         }
                         "movetime" => {
-                            let time_str = tokens.next().ok_or(UciError::MissingParameter("time as ms"))?;
-                            let time = time_str.parse().map_err(|_| UciError::InvalidParameter { got: Cow::Owned(time_str.to_string()), expected: "time as ms" })?;
+                            let time_str = tokens
+                                .next()
+                                .ok_or(UciError::MissingParameter("time as ms"))?;
+                            let time =
+                                time_str.parse().map_err(|_| UciError::InvalidParameter {
+                                    got: Cow::Owned(time_str.to_string()),
+                                    expected: "time as ms",
+                                })?;
                             params = params.with_search_time(Duration::from_millis(time))
                         }
-                        "infinite" => {
-                            params = params.set_infinite(true)
-                        }
-                        p => Err(UciError::InvalidParameter { got: Cow::Owned(p.to_string()), expected: "[searchmoves <moves> | ponder | wtime <ms> | btime <ms> | winc <ms> | binc <ms> | movestogo <n> | depth <n> | nodes <n> | mate <n> | movetime <ms> | infinite]" })?
+                        "infinite" => params = params.set_infinite(true),
+                        p => Err(UciError::InvalidParameter {
+                            got: Cow::Owned(p.to_string()),
+                            expected: "[searchmoves <moves> | ponder | wtime <ms> | btime <ms> | winc <ms> | binc <ms> | movestogo <n> | depth <n> | nodes <n> | mate <n> | movetime <ms> | infinite]",
+                        })?,
                     }
                 }
                 Ok(UciCommand::StartSearch(params))

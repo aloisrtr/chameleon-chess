@@ -22,31 +22,41 @@ use super::{
 
 #[cfg(feature = "serde")]
 use bitstream_io::{BitRead, BitWrite};
-use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Error)]
-// TODO: Better FEN parsing error reports.
-/// FEN parsing errors with context.
-pub enum FenError {
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+/// FEN parsing errors.
+pub enum FenParseError {
     /// A section contained an unexpected character.
-    #[error("Unexpected character at index {index}: {val}")]
-    UnexpectedToken { index: usize, val: char },
+    UnexpectedToken(char),
     /// A necessary section of the FEN string was missing.
-    #[error("FEN string missing the {0} section")]
     Incomplete(&'static str),
-    /// A non-ASCII character was found.
-    #[error("Found a non-ASCII character")]
-    NonAscii,
-    /// The piece section of the FEN string did not define all squares.
-    #[error("Piece section only defines {0} squares out of 8")]
-    IncompletePieceSection(u8),
+    /// The en passant square was not parsed correctly.
+    InvalidEnPassantSquare,
+    /// Castling rights could not be parsed correctly.
+    InvalidCastlingRights,
     /// Too many squares were defined in the FEN string.
-    #[error("The piece section defines too many squares")]
     TooManySquares,
     /// Indicates a generic parse error (fallback case).
-    #[error("Failed to parse")]
-    ParseError,
+    InputTooLong,
 }
+impl std::fmt::Display for FenParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnexpectedToken(c) => {
+                write!(f, "Unexpected character: {c}")
+            }
+            Self::Incomplete(s) => write!(f, "FEN string missing the {s} section"),
+            Self::TooManySquares => write!(f, "The piece section defines too many squares"),
+            Self::InvalidEnPassantSquare => write!(f, "En passant square could not be parsed"),
+            Self::InvalidCastlingRights => write!(f, "Castling rights could not be parsed"),
+            Self::InputTooLong => write!(
+                f,
+                "Some part of the input was left after parsing the FEN string"
+            ),
+        }
+    }
+}
+impl std::error::Error for FenParseError {}
 
 /// FEN string representation.
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -70,7 +80,7 @@ impl Fen {
     /// assert_eq!(parsed_values.side_to_move, Colour::White);
     /// assert_eq!(parsed_values.castling_rights, CastlingRights::full());
     /// ```
-    pub fn parse(fen: &str) -> Result<Self, FenError> {
+    pub fn parse(fen: &str) -> Result<Self, FenParseError> {
         fen.parse()
     }
 
@@ -216,10 +226,10 @@ impl Fen {
     }
 }
 impl PartialFromStr for Fen {
-    type Err = FenError;
+    type Err = FenParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
-        fn parse_piece_section(mut s: &str) -> Result<([Bitboard; 8], &str), FenError> {
+        fn parse_piece_section(mut s: &str) -> Result<([Bitboard; 8], &str), FenParseError> {
             let mut bitboards = [Bitboard::empty(); 8];
             let mut ranks = Rank::iter().rev();
             let mut squares = Square::rank_squares_iter(ranks.next().unwrap());
@@ -231,21 +241,20 @@ impl PartialFromStr for Fen {
                     s = &s[1..];
                 } else if c == '/' {
                     if squares.next().is_some() {
-                        // TODO: better error
-                        return Err(FenError::IncompletePieceSection(0));
+                        return Err(FenParseError::Incomplete("piece"));
                     }
                     squares = if let Some(rank) = ranks.next() {
                         Square::rank_squares_iter(rank)
                     } else {
-                        // TODO: same here
-                        return Err(FenError::ParseError);
+                        return Err(FenParseError::TooManySquares);
                     };
 
                     s = &s[1..];
                 } else if c == ' ' {
                     break;
                 } else {
-                    let (piece, left) = Piece::partial_from_str(s).unwrap();
+                    let (piece, left) = Piece::partial_from_str(s)
+                        .map_err(|_| FenParseError::UnexpectedToken(s.chars().next().unwrap()))?;
                     let square = squares.next().unwrap();
                     bitboards[NUM_COLOURS + piece.kind as usize].set(square);
                     bitboards[piece.colour as usize].set(square);
@@ -254,7 +263,7 @@ impl PartialFromStr for Fen {
             }
 
             if squares.next().is_some() {
-                Err(FenError::Incomplete("Piece placement"))
+                Err(FenParseError::Incomplete("Piece placement"))
             } else {
                 Ok((bitboards, s))
             }
@@ -266,12 +275,12 @@ impl PartialFromStr for Fen {
         let side_to_move = match s.chars().next() {
             Some('w') => Colour::White,
             Some('b') => Colour::Black,
-            _ => Err(FenError::Incomplete("Side to play"))?,
+            _ => Err(FenParseError::Incomplete("Side to play"))?,
         };
         let s = &s[1..];
 
-        // TODO: handle error
-        let (castling_rights, s) = CastlingRights::partial_from_str(walk_whitespace(s)).unwrap();
+        let (castling_rights, s) = CastlingRights::partial_from_str(walk_whitespace(s))
+            .map_err(|_| FenParseError::InvalidCastlingRights)?;
 
         let s = walk_whitespace(s);
         let (en_passant, s) = match s.chars().next() {
@@ -281,10 +290,9 @@ impl PartialFromStr for Fen {
                 let (sq, s) = Square::partial_from_str(s).unwrap();
                 (Some(sq), s)
             }
-            None => Err(FenError::Incomplete("En passant target"))?,
+            None => Err(FenParseError::Incomplete("En passant target"))?,
         };
 
-        // TODO: check errors here
         let (halfmove_clock, s) = match parse_int(walk_whitespace(s)) {
             Ok((h, s)) => (h, s),
             Err(_) => (0, s),
@@ -308,14 +316,14 @@ impl PartialFromStr for Fen {
     }
 }
 impl std::str::FromStr for Fen {
-    type Err = FenError;
+    type Err = FenParseError;
 
     fn from_str(fen_str: &str) -> Result<Self, Self::Err> {
         Self::partial_from_str(fen_str).and_then(|(fen, s)| {
             if s.is_empty() {
                 Ok(fen)
             } else {
-                Err(FenError::ParseError)
+                Err(FenParseError::InputTooLong)
             }
         })
     }
