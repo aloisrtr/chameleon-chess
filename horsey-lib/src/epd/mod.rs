@@ -9,9 +9,14 @@ use operation::EpdOperation;
 
 use crate::{
     chess::{
-        bitboard::*, castling_rights::CastlingRights, colour::*, fen::Fen, piece::*, square::File,
+        bitboard::*,
+        castling_rights::CastlingRights,
+        colour::*,
+        fen::{Fen, FenParseError},
+        piece::*,
+        square::File,
     },
-    parsing::{PartialFromStr, walk_whitespace},
+    parsing::{PartialFromStr, parse_char},
 };
 
 pub mod operation;
@@ -22,6 +27,7 @@ pub mod operation;
 /// - castling rights
 /// - en passant target square (if any)
 /// - a list of [`EpdOperation`]
+#[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct Epd {
     pub(crate) bitboards: [Bitboard; NUM_COLOURS + NUM_PIECES],
     pub side_to_move: Colour,
@@ -30,17 +36,26 @@ pub struct Epd {
     pub operations: Vec<EpdOperation>,
 }
 impl PartialFromStr for Epd {
-    type Err = ();
+    type Err = FenParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
-        let (fen, s) = Fen::partial_from_str(s).map_err(|_| ())?;
+        let (fen, s) = Fen::partial_from_str(s)?;
 
-        let mut s = walk_whitespace(s);
         let mut operations = vec![];
-        while let Ok((op, left)) = EpdOperation::partial_from_str(s) {
-            operations.push(op);
-            s = walk_whitespace(left)
-        }
+        let s = if let Ok(mut s) = parse_char(s, ' ') {
+            while let Ok((op, left)) = EpdOperation::partial_from_str(s) {
+                operations.push(op);
+                if let Ok(left) = parse_char(left, ' ') {
+                    s = left
+                } else {
+                    s = left;
+                    break;
+                }
+            }
+            s
+        } else {
+            s
+        };
 
         Ok((
             Self {
@@ -52,5 +67,17 @@ impl PartialFromStr for Epd {
             },
             s,
         ))
+    }
+}
+impl std::str::FromStr for Epd {
+    type Err = FenParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::partial_from_str(s).and_then(|(epd, rest)| {
+            if rest.is_empty() {
+                Ok(epd)
+            } else {
+                Err(FenParseError::InputTooLong)
+            }
+        })
     }
 }

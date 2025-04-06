@@ -17,6 +17,8 @@ bitstream-io = { version = "2.6", default-features = false, optional = true }
 
 [features]
 default = []
+pgn = []
+epd = []
 log = ["dep:log"]
 serde = ["dep:serde", "dep:bitstream-io"]
 

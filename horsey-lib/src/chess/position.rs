@@ -167,7 +167,7 @@ impl Position {
             side_to_move: fen.side_to_move,
             castling_rights: fen.castling_rights,
             reversible_moves: fen.halfmove_clock as u8,
-            en_passant_file: fen.en_passant.map(|ep| ep.file()),
+            en_passant_file: fen.en_passant_file,
             history: Vec::new(),
             hash: 0,
 
@@ -186,16 +186,7 @@ impl Position {
             bitboards: self.bitboards,
             side_to_move: self.side_to_move,
             castling_rights: self.castling_rights,
-            en_passant: self.en_passant_file.map(|file| {
-                Square::new(
-                    file,
-                    if self.side_to_move.is_white() {
-                        Rank::Six
-                    } else {
-                        Rank::Three
-                    },
-                )
-            }),
+            en_passant_file: self.en_passant_file,
             halfmove_clock: self.reversible_moves as u16,
             fullmove_counter: (self.history.len() / 2) as u16,
         }

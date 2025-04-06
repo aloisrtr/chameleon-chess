@@ -1,10 +1,14 @@
-//! # Various EPD operations
+//! # Representations for EPD operations (operation codes and operands).
 
 use crate::{
-    chess::action::SanMove,
-    parsing::{PartialFromStr, parse_i32, parse_string, parse_u32},
+    chess::action::{SanMove, SanParseError},
+    parsing::{PartialFromStr, parse_char, parse_i32, parse_string, parse_u32},
 };
 
+/// Standard EPD operation code.
+///
+/// Non-standard operation codes are stored in the `Other` variant.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum EpdOpCode {
     AnalysisCountDepth,
     AnalysisCountNodes,
@@ -70,8 +74,41 @@ impl std::fmt::Display for EpdOpCode {
         }
     }
 }
+
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Hash, Debug)]
+pub enum EpdOpCodeParseError {
+    /// EPD operation codes are limited to 14 characters and are whitespace terminated.
+    TooManyCharacters,
+    /// An operation code must start with an ASCII alphabetic character (a-zA-Z).
+    InvalidFirstCharacter(char),
+    /// An operation code cannot be empty.
+    EmptyInput,
+    /// Some part of the input was left after parsing a valid EPD operation code.
+    UnconsumedInput,
+}
+impl std::fmt::Display for EpdOpCodeParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooManyCharacters => {
+                write!(f, "EPD operation codes are limited to 14 characters")
+            }
+            Self::InvalidFirstCharacter(c) => write!(
+                f,
+                "EPD operation codes must start with an ASCII alphabetic character, but got {c}"
+            ),
+            Self::EmptyInput => write!(f, "Cannot parse an operation code from empty input"),
+            Self::UnconsumedInput => write!(
+                f,
+                "Some part of the input was left after parsing a valid EPD operation code"
+            ),
+        }
+    }
+}
+impl std::error::Error for EpdOpCodeParseError {}
+
 impl PartialFromStr for EpdOpCode {
-    type Err = ();
+    type Err = EpdOpCodeParseError;
+
     fn partial_from_str(mut s: &str) -> Result<(Self, &str), Self::Err> {
         let mut parsed: heapless::String<14> = heapless::String::new();
         match s.chars().next() {
@@ -79,14 +116,15 @@ impl PartialFromStr for EpdOpCode {
                 parsed.push(c).unwrap();
                 s = &s[c.len_utf8()..]
             }
-            // TODO: better error here
-            _ => return Err(()),
+            Some(c) => return Err(EpdOpCodeParseError::InvalidFirstCharacter(c)),
+            _ => return Err(EpdOpCodeParseError::EmptyInput),
         }
 
         while let Some(c) = s.chars().next() {
             if c.is_ascii_alphanumeric() || c == '_' {
-                // TODO: better error
-                parsed.push(c).map_err(|_| ())?;
+                parsed
+                    .push(c)
+                    .map_err(|_| EpdOpCodeParseError::TooManyCharacters)?;
             } else {
                 break;
             }
@@ -124,13 +162,25 @@ impl PartialFromStr for EpdOpCode {
                     .chars()
                     .nth(2)
                     .and_then(|c| c.to_digit(10))
-                    .map(|i| Self::Comment(i as u8))
+                    .and_then(|i| {
+                        if parsed.len() <= 2 {
+                            Some(Self::Comment(i as u8))
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or(Self::Other(parsed)),
                 Some('v') => parsed
                     .chars()
                     .nth(2)
                     .and_then(|c| c.to_digit(10))
-                    .map(|i| Self::Comment(i as u8))
+                    .and_then(|i| {
+                        if parsed.len() <= 2 {
+                            Some(Self::Variation(i as u8))
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or(Self::Other(parsed)),
                 _ => Self::Other(parsed),
             },
@@ -139,7 +189,22 @@ impl PartialFromStr for EpdOpCode {
         Ok((opcode, left))
     }
 }
+impl std::str::FromStr for EpdOpCode {
+    type Err = EpdOpCodeParseError;
 
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::partial_from_str(s).and_then(|(op, rest)| {
+            if rest.is_empty() {
+                Ok(op)
+            } else {
+                Err(EpdOpCodeParseError::UnconsumedInput)
+            }
+        })
+    }
+}
+
+/// Represents values that can serve as operands in EPD operations.
+#[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub enum EpdOperand {
     String(String),
     Move(SanMove),
@@ -159,16 +224,51 @@ impl std::fmt::Display for EpdOperand {
         }
     }
 }
+
+#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Hash, Debug)]
+pub enum EpdOperandParseError {
+    EmptyInput,
+    InvalidUnsignedInt,
+    InvalidInteger,
+    InvalidStringValue,
+    InvalidFloatFractionalPart,
+    InvalidSanMove(SanParseError),
+    UnconsumedInput,
+}
+impl std::fmt::Display for EpdOperandParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyInput => write!(f, "Cannot parse operand from empty input"),
+            Self::InvalidUnsignedInt => write!(f, "Failed to parse unsigned integer operand"),
+            Self::InvalidInteger => write!(f, "Failed to parse integer operand"),
+            Self::InvalidStringValue => write!(f, "Failed to parse string operand"),
+            Self::InvalidFloatFractionalPart => {
+                write!(f, "Failed to parse the fractional part of float operand")
+            }
+            Self::InvalidSanMove(e) => write!(f, "Failed to parse SAN move operand: {e}"),
+            Self::UnconsumedInput => write!(
+                f,
+                "Some part of the input was left after parsing valid EPD operand"
+            ),
+        }
+    }
+}
+impl std::error::Error for EpdOperandParseError {}
+
 impl PartialFromStr for EpdOperand {
-    type Err = ();
+    type Err = EpdOperandParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
         match s.chars().next() {
-            Some('"') => parse_string(s).map(|(s, left)| (Self::String(s), left)),
+            Some('"') => parse_string(s)
+                .map(|(s, left)| (Self::String(s), left))
+                .map_err(|_| EpdOperandParseError::InvalidStringValue),
             Some('-') | Some('+') => {
-                let (integer, left) = parse_i32(s)?;
+                let (integer, left) =
+                    parse_i32(s).map_err(|_| EpdOperandParseError::InvalidInteger)?;
                 if let Some('.') = left.chars().next() {
-                    let (fractional, left) = parse_u32(left)?;
+                    let (fractional, left) = parse_u32(left)
+                        .map_err(|_| EpdOperandParseError::InvalidFloatFractionalPart)?;
                     Ok((
                         Self::Float(format!("{integer}.{fractional}").parse().unwrap()),
                         left,
@@ -177,14 +277,59 @@ impl PartialFromStr for EpdOperand {
                     Ok((Self::Signed(integer), left))
                 }
             }
-            Some(c) if c.is_ascii_digit() => parse_u32(s).map(|(i, s)| (Self::Unsigned(i), s)),
-            _ => SanMove::partial_from_str(s)
+            Some(c) if c.is_ascii_digit() => parse_u32(s)
+                .map(|(i, s)| (Self::Unsigned(i), s))
+                .map_err(|_| EpdOperandParseError::InvalidUnsignedInt),
+            Some(_) => SanMove::partial_from_str(s)
                 .map(|(m, s)| (Self::Move(m), s))
-                .map_err(|_| ()),
+                .map_err(|e| EpdOperandParseError::InvalidSanMove(e)),
+            None => Err(EpdOperandParseError::EmptyInput),
         }
     }
 }
+impl std::str::FromStr for EpdOperand {
+    type Err = EpdOperandParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::partial_from_str(s).and_then(|(op, rest)| {
+            if rest.is_empty() {
+                Ok(op)
+            } else {
+                Err(EpdOperandParseError::UnconsumedInput)
+            }
+        })
+    }
+}
+impl From<u32> for EpdOperand {
+    fn from(value: u32) -> Self {
+        Self::Unsigned(value)
+    }
+}
+impl From<String> for EpdOperand {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+impl From<f32> for EpdOperand {
+    fn from(value: f32) -> Self {
+        Self::Float(value)
+    }
+}
+impl From<i32> for EpdOperand {
+    fn from(value: i32) -> Self {
+        Self::Signed(value)
+    }
+}
+impl From<SanMove> for EpdOperand {
+    fn from(value: SanMove) -> Self {
+        Self::Move(value)
+    }
+}
 
+/// An EPD operation, with its operation code and a list of operands.
+///
+/// Note that the validity of such combinations is not checked, as user-defined
+/// operations can take any number of operands, in any order and with any type.
+#[derive(Clone, PartialEq, PartialOrd, Debug)]
 pub struct EpdOperation {
     pub opcode: EpdOpCode,
     pub operands: Vec<EpdOperand>,
@@ -198,28 +343,62 @@ impl std::fmt::Display for EpdOperation {
         write!(f, ";")
     }
 }
+
+#[derive(PartialEq, PartialOrd, Ord, Eq, Hash, Clone, Copy, Debug)]
+pub enum EpdOperationParseError {
+    InvalidOpCode(EpdOpCodeParseError),
+    MissingSemiColon,
+    UnconsumedInput,
+}
+impl std::fmt::Display for EpdOperationParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidOpCode(e) => write!(f, "Invalid opcode: {e}"),
+            Self::MissingSemiColon => write!(f, "Missing semicolon as delimited for EPD operation"),
+            Self::UnconsumedInput => write!(
+                f,
+                "Some part of the input was left after parsing a valid EPD operation"
+            ),
+        }
+    }
+}
+impl std::error::Error for EpdOperationParseError {}
+
 impl PartialFromStr for EpdOperation {
-    type Err = ();
+    type Err = EpdOperationParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
-        let (opcode, s) = EpdOpCode::partial_from_str(s)?;
-        let mut s = if let Some(' ') = s.chars().next() {
-            &s[1..]
-        } else {
-            return Err(());
-        };
+        let (opcode, s) =
+            EpdOpCode::partial_from_str(s).map_err(|e| EpdOperationParseError::InvalidOpCode(e))?;
+
         let mut operands = vec![];
-        while let Ok((operand, left)) = EpdOperand::partial_from_str(s) {
-            operands.push(operand);
-            s = left
-        }
-
-        let s = if let Some(';') = s.chars().next() {
-            &s[1..]
+        let s = if let Ok(mut s) = parse_char(s, ' ') {
+            while let Ok((operand, left)) = EpdOperand::partial_from_str(s) {
+                operands.push(operand);
+                s = if let Ok(s) = parse_char(left, ' ') {
+                    s
+                } else {
+                    break;
+                }
+            }
+            s
         } else {
-            return Err(());
+            s
         };
 
+        let s = parse_char(s, ';').map_err(|_| EpdOperationParseError::MissingSemiColon)?;
         Ok((Self { opcode, operands }, s))
+    }
+}
+impl std::str::FromStr for EpdOperation {
+    type Err = EpdOperationParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::partial_from_str(s).and_then(|(epd, rest)| {
+            if rest.is_empty() {
+                Ok(epd)
+            } else {
+                Err(EpdOperationParseError::UnconsumedInput)
+            }
+        })
     }
 }

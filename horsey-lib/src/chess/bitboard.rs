@@ -9,7 +9,7 @@ use super::square::{Delta, Rank, Square};
 ///
 /// They are augmented u64 values.
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default)]
 pub struct Bitboard(pub(crate) u64);
 
 impl Bitboard {

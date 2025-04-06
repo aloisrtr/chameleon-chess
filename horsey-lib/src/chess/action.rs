@@ -485,7 +485,7 @@ impl std::fmt::Display for SanMove {
 }
 
 /// Errors that may arise when parsing SAN moves.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum SanParseError {
     InvalidOriginFile(FileParseError),
     InvalidOriginRank(RankParseError),

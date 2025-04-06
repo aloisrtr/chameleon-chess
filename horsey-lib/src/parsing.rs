@@ -46,6 +46,7 @@ impl<T: PartialFromStr> PartialFromStr for Result<T, <T as PartialFromStr>::Err>
 }
 
 /// Parses a string value with escaped characters.
+#[allow(dead_code)]
 pub(crate) fn parse_string(src: &str) -> Result<(String, &str), ()> {
     let mut result = String::new();
     let mut chars = src.chars();
@@ -77,6 +78,7 @@ pub(crate) fn parse_string(src: &str) -> Result<(String, &str), ()> {
 }
 
 /// Parses a a u32 value.
+#[allow(dead_code)]
 pub(crate) fn parse_u32(src: &str) -> Result<(u32, &str), ()> {
     let mut result = 0u32;
     let mut parsed = 0;
@@ -96,6 +98,7 @@ pub(crate) fn parse_u32(src: &str) -> Result<(u32, &str), ()> {
     }
 }
 /// Parses a i32 value.
+#[allow(dead_code)]
 pub(crate) fn parse_i32(src: &str) -> Result<(i32, &str), ()> {
     match src.chars().next() {
         Some('-') => parse_u32(&src[1..]).map(|(i, left)| (-(i as i32), left)),
@@ -106,6 +109,7 @@ pub(crate) fn parse_i32(src: &str) -> Result<(i32, &str), ()> {
 }
 
 /// Parses a single char and returns the rest of the string.
+#[allow(dead_code)]
 pub(crate) fn parse_char(src: &str, c: char) -> Result<&str, ()> {
     match src.chars().next() {
         Some(v) if v == c => Ok(&src[c.len_utf8()..]),
@@ -114,6 +118,7 @@ pub(crate) fn parse_char(src: &str, c: char) -> Result<&str, ()> {
 }
 
 /// Returns the rest of the input after walking whitespace values.
+#[allow(dead_code)]
 pub(crate) fn walk_whitespace(src: &str) -> &str {
     src.trim_start()
 }

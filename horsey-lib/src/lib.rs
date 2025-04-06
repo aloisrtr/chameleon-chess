@@ -27,8 +27,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub mod brain;
 pub mod chess;
+#[cfg(feature = "epd")]
 pub mod epd;
 pub mod parsing;
+#[cfg(feature = "pgn")]
 pub mod pgn;
 pub mod search;
 pub mod uci;
