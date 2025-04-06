@@ -9,54 +9,19 @@
 
 use crate::{
     chess::square::Rank,
-    parsing::{PartialFromStr, parse_u32, walk_whitespace},
+    parsing::{PartialFromStr, parse_char, parse_u32},
 };
 
 use super::{
     bitboard::Bitboard,
-    castling_rights::CastlingRights,
+    castling_rights::{CastlingParseError, CastlingRights},
     colour::{Colour, NUM_COLOURS},
-    piece::{NUM_PIECES, Piece, PieceKind},
-    square::{File, Square},
+    piece::{NUM_PIECES, Piece, PieceKind, PieceParseError},
+    square::{File, Square, SquareParseError},
 };
 
 #[cfg(feature = "serde")]
 use bitstream_io::{BitRead, BitWrite};
-
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
-/// FEN parsing errors.
-pub enum FenParseError {
-    /// A section contained an unexpected character.
-    UnexpectedToken(char),
-    /// A necessary section of the FEN string was missing.
-    Incomplete(&'static str),
-    /// The en passant square was not parsed correctly.
-    InvalidEnPassantSquare,
-    /// Castling rights could not be parsed correctly.
-    InvalidCastlingRights,
-    /// Too many squares were defined in the FEN string.
-    TooManySquares,
-    /// Indicates a generic parse error (fallback case).
-    InputTooLong,
-}
-impl std::fmt::Display for FenParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnexpectedToken(c) => {
-                write!(f, "Unexpected character: {c}")
-            }
-            Self::Incomplete(s) => write!(f, "FEN string missing the {s} section"),
-            Self::TooManySquares => write!(f, "The piece section defines too many squares"),
-            Self::InvalidEnPassantSquare => write!(f, "En passant square could not be parsed"),
-            Self::InvalidCastlingRights => write!(f, "Castling rights could not be parsed"),
-            Self::InputTooLong => write!(
-                f,
-                "Some part of the input was left after parsing the FEN string"
-            ),
-        }
-    }
-}
-impl std::error::Error for FenParseError {}
 
 /// FEN string representation.
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -225,6 +190,60 @@ impl Fen {
         })
     }
 }
+
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+/// FEN parsing errors.
+pub enum FenParseError {
+    /// A separator between two sections is missing.
+    MissingSeparator,
+    /// A piece placement rank was left incomplete.
+    IncompleteRank { rank: Rank, undefined: u8 },
+    /// Failed to parse a piece symbol.
+    InvalidPiece(PieceParseError),
+    /// Failed to parse the side to move.
+    InvalidSideToMove,
+    /// The en passant square was not parsed correctly.
+    InvalidEnPassantSquare(SquareParseError),
+    /// The en passant rank was not correct (either 3 for black or 6 for white)
+    InvalidEnPassantRank { expected: Rank, got: Rank },
+    /// Castling rights could not be parsed correctly.
+    InvalidCastlingRights(CastlingParseError),
+    /// Too many ranks were defined in the FEN string.
+    TooManyRanks,
+    /// Indicates a generic parse error (fallback case).
+    InputTooLong,
+}
+impl std::fmt::Display for FenParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingSeparator => write!(f, "Missing section separator"),
+            Self::IncompleteRank { rank, undefined } => write!(
+                f,
+                "Rank {rank} of the piece section is missing {undefined} squares"
+            ),
+            Self::TooManyRanks => write!(
+                f,
+                "The piece section defines at least one non-existing rank"
+            ),
+            Self::InvalidPiece(e) => write!(f, "Failed to parse a piece symbol: {e}"),
+            Self::InvalidSideToMove => write!(f, "Failed to parse the side to move"),
+            Self::InvalidEnPassantSquare(e) => {
+                write!(f, "En passant square could not be parsed: {e}")
+            }
+            Self::InvalidEnPassantRank { expected, got } => write!(
+                f,
+                "Incompatible en passant rank: expected {expected}, got {got}"
+            ),
+            Self::InvalidCastlingRights(e) => write!(f, "Castling rights could not be parsed: {e}"),
+            Self::InputTooLong => write!(
+                f,
+                "Some part of the input was left after parsing the FEN string"
+            ),
+        }
+    }
+}
+impl std::error::Error for FenParseError {}
+
 impl PartialFromStr for Fen {
     type Err = FenParseError;
 
@@ -232,7 +251,8 @@ impl PartialFromStr for Fen {
         fn parse_piece_section(mut s: &str) -> Result<([Bitboard; 8], &str), FenParseError> {
             let mut bitboards = [Bitboard::empty(); 8];
             let mut ranks = Rank::iter().rev();
-            let mut squares = Square::rank_squares_iter(ranks.next().unwrap());
+            let mut current_rank = ranks.next().unwrap();
+            let mut squares = Square::rank_squares_iter(current_rank);
             while let Some(c) = s.chars().next() {
                 if let Some(digit) = c.to_digit(10) {
                     for _ in 0..digit {
@@ -241,20 +261,24 @@ impl PartialFromStr for Fen {
                     s = &s[1..];
                 } else if c == '/' {
                     if squares.next().is_some() {
-                        return Err(FenParseError::Incomplete("piece"));
+                        return Err(FenParseError::IncompleteRank {
+                            rank: current_rank,
+                            undefined: 1 + squares.count() as u8,
+                        });
                     }
                     squares = if let Some(rank) = ranks.next() {
+                        current_rank = rank;
                         Square::rank_squares_iter(rank)
                     } else {
-                        return Err(FenParseError::TooManySquares);
+                        return Err(FenParseError::TooManyRanks);
                     };
 
                     s = &s[1..];
                 } else if c == ' ' {
                     break;
                 } else {
-                    let (piece, left) = Piece::partial_from_str(s)
-                        .map_err(|_| FenParseError::UnexpectedToken(s.chars().next().unwrap()))?;
+                    let (piece, left) =
+                        Piece::partial_from_str(s).map_err(|e| FenParseError::InvalidPiece(e))?;
                     let square = squares.next().unwrap();
                     bitboards[NUM_COLOURS + piece.kind as usize].set(square);
                     bitboards[piece.colour as usize].set(square);
@@ -263,7 +287,12 @@ impl PartialFromStr for Fen {
             }
 
             if squares.next().is_some() {
-                Err(FenParseError::Incomplete("Piece placement"))
+                Err(FenParseError::IncompleteRank {
+                    rank: current_rank,
+                    undefined: squares.count() as u8 + 1,
+                })
+            } else if let Some(rank) = ranks.next() {
+                Err(FenParseError::IncompleteRank { rank, undefined: 8 })
             } else {
                 Ok((bitboards, s))
             }
@@ -271,38 +300,47 @@ impl PartialFromStr for Fen {
 
         let (bitboards, s) = parse_piece_section(s)?;
 
-        let s = walk_whitespace(s);
+        let s = parse_char(s, ' ').map_err(|_| FenParseError::MissingSeparator)?;
         let side_to_move = match s.chars().next() {
             Some('w') => Colour::White,
             Some('b') => Colour::Black,
-            _ => Err(FenParseError::Incomplete("Side to play"))?,
+            _ => Err(FenParseError::InvalidSideToMove)?,
         };
         let s = &s[1..];
 
-        let (castling_rights, s) = CastlingRights::partial_from_str(walk_whitespace(s))
-            .map_err(|_| FenParseError::InvalidCastlingRights)?;
+        let s = parse_char(s, ' ').map_err(|_| FenParseError::MissingSeparator)?;
+        let (castling_rights, s) = CastlingRights::partial_from_str(s)
+            .map_err(|e| FenParseError::InvalidCastlingRights(e))?;
 
-        let s = walk_whitespace(s);
+        let s = parse_char(s, ' ').map_err(|_| FenParseError::MissingSeparator)?;
         let (en_passant_file, s) = match s.chars().next() {
             Some('-') => (None, &s[1..]),
-            Some(_) => {
+            _ => {
                 let (sq, s) = Square::partial_from_str(s)
-                    .map_err(|_| FenParseError::InvalidEnPassantSquare)?;
-                if (side_to_move.is_black() && sq.rank() != Rank::Three)
-                    || (side_to_move.is_white() && sq.rank() != Rank::Six)
+                    .map_err(|e| FenParseError::InvalidEnPassantSquare(e))?;
+                if (sq.rank() != Rank::Three && side_to_move.is_black())
+                    || (sq.rank() != Rank::Six && side_to_move.is_white())
                 {
-                    return Err(FenParseError::InvalidEnPassantSquare);
+                    return Err(FenParseError::InvalidEnPassantRank {
+                        expected: if side_to_move.is_black() {
+                            Rank::Three
+                        } else {
+                            Rank::Six
+                        },
+                        got: sq.rank(),
+                    });
                 }
                 (Some(sq.file()), s)
             }
-            None => Err(FenParseError::Incomplete("En passant target"))?,
         };
 
-        let (halfmove_clock, s) = match parse_u32(walk_whitespace(s)) {
+        let s = parse_char(s, ' ').unwrap_or(s);
+        let (halfmove_clock, s) = match parse_u32(s) {
             Ok((h, s)) => (h, s),
             Err(_) => (0, s),
         };
-        let (fullmove_counter, s) = match parse_u32(walk_whitespace(s)) {
+        let s = parse_char(s, ' ').unwrap_or(s);
+        let (fullmove_counter, s) = match parse_u32(s) {
             Ok((f, s)) => (f, s),
             Err(_) => (0, s),
         };
@@ -313,8 +351,8 @@ impl PartialFromStr for Fen {
                 side_to_move,
                 en_passant_file,
                 castling_rights,
-                halfmove_clock,
-                fullmove_counter,
+                halfmove_clock: halfmove_clock as u16,
+                fullmove_counter: fullmove_counter as u16,
             },
             s,
         ))

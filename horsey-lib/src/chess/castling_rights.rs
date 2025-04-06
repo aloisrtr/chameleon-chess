@@ -9,6 +9,12 @@ use super::{
     zobrist::{CASTLING_RIGHTS_OFFSET, ZOBRIST_KEYS},
 };
 
+/// Types of castling moves.
+pub enum CastlingKind {
+    QueenSide(Colour),
+    KingSide(Colour),
+}
+
 /// Efficient representation of castling rights.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CastlingRights(u8);
@@ -34,6 +40,14 @@ impl CastlingRights {
     /// Returns `true` if none of the sides can castle.
     pub const fn is_none(self) -> bool {
         self.0 == Self::EMPTY
+    }
+
+    /// Checks if a type of castling move is allowed.
+    pub const fn is_allowed(self, kind: CastlingKind) -> bool {
+        match kind {
+            CastlingKind::QueenSide(c) => self.queenside_castle_allowed(c),
+            CastlingKind::KingSide(c) => self.kingside_castle_allowed(c),
+        }
     }
 
     /// Checks if queenside castling is allowed for a certain colour.
@@ -145,9 +159,29 @@ impl CastlingRights {
         res
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash)]
+pub enum CastlingParseError {
+    /// Tried parsing castling rights from an empty input.
+    EmptyInput,
+    /// Some part of the input was left after parsing a valid castling right token.
+    UnconsumedInput,
+}
+impl std::fmt::Display for CastlingParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyInput => write!(f, "Cannot parse castling rights from an empty input"),
+            Self::UnconsumedInput => write!(
+                f,
+                "Some part of the input was left after parsing a valid castling rights token"
+            ),
+        }
+    }
+}
+impl std::error::Error for CastlingParseError {}
+
 impl PartialFromStr for CastlingRights {
-    // TODO: better error
-    type Err = ();
+    type Err = CastlingParseError;
 
     fn partial_from_str(mut s: &str) -> Result<(Self, &str), Self::Err> {
         let mut rights = Self::EMPTY;
@@ -163,18 +197,22 @@ impl PartialFromStr for CastlingRights {
             s = &s[1..]
         }
         if rights == Self::EMPTY {
-            // TODO: better error
-            Err(())
+            Err(CastlingParseError::EmptyInput)
         } else {
             Ok((Self(rights), s))
         }
     }
 }
 impl FromStr for CastlingRights {
-    // TODO: better error
-    type Err = ();
+    type Err = CastlingParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::partial_from_str(s).and_then(|(r, s)| if s.is_empty() { Ok(r) } else { Err(()) })
+        Self::partial_from_str(s).and_then(|(r, s)| {
+            if s.is_empty() {
+                Ok(r)
+            } else {
+                Err(CastlingParseError::UnconsumedInput)
+            }
+        })
     }
 }
 impl std::fmt::Display for CastlingRights {
