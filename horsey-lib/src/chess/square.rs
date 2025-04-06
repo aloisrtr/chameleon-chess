@@ -623,7 +623,7 @@ impl std::fmt::Display for Square {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Debug)]
 pub enum SquareParseError {
     InvalidFile(FileParseError),
     InvalidRank(RankParseError),

@@ -96,6 +96,14 @@ pub(crate) fn parse_int(src: &str) -> Result<(u16, &str), ()> {
     }
 }
 
+/// Parses a single char and returns the rest of the string.
+pub(crate) fn parse_char(src: &str, c: char) -> Result<&str, ()> {
+    match src.chars().next() {
+        Some(v) if v == c => Ok(&src[c.len_utf8()..]),
+        _ => Err(()),
+    }
+}
+
 /// Returns the rest of the input after walking whitespace values.
 pub fn walk_whitespace(src: &str) -> &str {
     src.trim_start()
