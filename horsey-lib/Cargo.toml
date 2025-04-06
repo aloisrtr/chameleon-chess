@@ -17,6 +17,8 @@ bitstream-io = { version = "2.6", default-features = false, optional = true }
 
 [features]
 default = []
+uci-client = []
+uci-server = []
 pgn = []
 epd = []
 log = ["dep:log"]
