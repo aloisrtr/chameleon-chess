@@ -269,10 +269,9 @@ impl PartialFromStr for EpdOperand {
                 if let Some('.') = left.chars().next() {
                     let (fractional, left) = parse_u32(left)
                         .map_err(|_| EpdOperandParseError::InvalidFloatFractionalPart)?;
-                    Ok((
-                        Self::Float(format!("{integer}.{fractional}").parse().unwrap()),
-                        left,
-                    ))
+                    let fractional =
+                        fractional as f32 / 10f32.powi((fractional as f32).log10().ceil() as i32);
+                    Ok((Self::Float(integer as f32 + fractional), left))
                 } else {
                     Ok((Self::Signed(integer), left))
                 }
