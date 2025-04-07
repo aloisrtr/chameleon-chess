@@ -3,7 +3,7 @@
 //! scoring, etc.
 
 pub mod action;
-pub(crate) mod bitboard;
+pub mod bitboard;
 pub mod castling_rights;
 pub mod colour;
 mod history;

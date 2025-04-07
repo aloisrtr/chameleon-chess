@@ -2,7 +2,10 @@
 //! The implementation follows the 2023-03-22 revision of the PGN standard which
 //! can be found [here](https://github.com/fsmosca/PGN-Standard/blob/master/PGN-Standard.txt).
 
-use std::fmt::{Arguments, Write};
+use std::{
+    cmp::Ordering,
+    fmt::{Arguments, Write},
+};
 
 use crate::parsing::*;
 
@@ -188,7 +191,7 @@ impl PartialFromStr for PgnMoveText {
     fn partial_from_str(mut s: &str) -> Result<(Self, &str), Self::Err> {
         let mut result = PgnMoveText::default();
         let mut current_node_stack: Vec<Option<usize>> = vec![None];
-        let mut current_move_number = 0;
+        let mut current_move_number = 0u16;
         loop {
             s = walk_whitespace_and_comments(s);
             if let Ok((game_result, left)) = parse_game_result(s) {
@@ -197,10 +200,10 @@ impl PartialFromStr for PgnMoveText {
                 break;
             }
             match s.chars().next() {
-                Some(c) if c.is_digit(10) => {
+                Some(c) if c.is_ascii_digit() => {
                     let (move_num, left) = parse_u32(s).unwrap();
                     s = left;
-                    current_move_number = (move_num - 1) * 2
+                    current_move_number = (move_num as u16 - 1) * 2
                 }
                 Some('.') => {
                     s = &s[1..];
@@ -241,13 +244,15 @@ impl PartialFromStr for PgnMoveText {
                     if let Some(Some(parent_index)) = current_node_stack.pop() {
                         let parent = result.get_move_mut(parent_index);
                         parent.main_child = Some(node_index);
-                        if parent.halfmove > current_move_number {
-                            return Err(PgnMoveTextParseError::IncoherentMoveNumbering {
-                                expected: parent.halfmove,
-                                got: current_move_number,
-                            });
-                        } else if parent.halfmove == current_move_number {
-                            current_move_number = parent.halfmove + 1;
+                        match parent.halfmove.cmp(&current_move_number) {
+                            Ordering::Greater => {
+                                return Err(PgnMoveTextParseError::IncoherentMoveNumbering {
+                                    expected: parent.halfmove,
+                                    got: current_move_number,
+                                });
+                            }
+                            Ordering::Equal => current_move_number = parent.halfmove + 1,
+                            _ => (),
                         }
                     } else if let Some(&Some(parent_index)) = current_node_stack.last() {
                         let parent = result.get_move_mut(parent_index);
@@ -377,9 +382,9 @@ impl PartialFromStr for PgnGame {
     type Err = PgnGameParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
-        let (tags, s) = parse_tag_pairs(s).map_err(|e| PgnGameParseError::TagPairsError(e))?;
+        let (tags, s) = parse_tag_pairs(s).map_err(PgnGameParseError::TagPairsError)?;
         let (movetext, s) =
-            PgnMoveText::partial_from_str(s).map_err(|e| PgnGameParseError::MovetextError(e))?;
+            PgnMoveText::partial_from_str(s).map_err(PgnGameParseError::MovetextError)?;
         Ok((Self { tags, movetext }, s))
     }
 }

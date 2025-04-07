@@ -1,8 +1,8 @@
 use std::{
     cell::UnsafeCell,
     sync::{
-        atomic::{AtomicBool, AtomicI16, AtomicU64, Ordering},
         Arc, Weak,
+        atomic::{AtomicBool, AtomicI16, AtomicU64, Ordering},
     },
 };
 
@@ -199,7 +199,7 @@ impl Node {
             }
             Value::Draw => (0, 1),
         };
-        let sv = (wins as u64) << 32 | samples as u64;
+        let sv = ((wins as u64) << 32) | samples as u64;
         self.score_visits.fetch_add(sv, Ordering::SeqCst);
     }
 

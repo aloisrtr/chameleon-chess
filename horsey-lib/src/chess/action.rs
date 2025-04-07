@@ -54,19 +54,19 @@ impl Action {
     /// Creates a new quiet move.
     #[inline(always)]
     pub(crate) const fn new_quiet(origin: Square, target: Square) -> Self {
-        Self(origin as u16 | (target as u16) << 6)
+        Self(origin as u16 | ((target as u16) << 6))
     }
 
     /// Creates a new capture.
     #[inline(always)]
     pub(crate) const fn new_capture(origin: Square, target: Square) -> Self {
-        Self(origin as u16 | (target as u16) << 6 | Self::CAPTURE)
+        Self(origin as u16 | ((target as u16) << 6) | Self::CAPTURE)
     }
 
     /// Creates a new double push.
     #[inline(always)]
     pub(crate) const fn new_double_push(origin: Square, target: Square) -> Self {
-        Self(origin as u16 | (target as u16) << 6 | Self::SPECIAL_0)
+        Self(origin as u16 | ((target as u16) << 6) | Self::SPECIAL_0)
     }
 
     /// Returns a new promoting move.
@@ -78,16 +78,16 @@ impl Action {
     ) -> Self {
         Self(
             origin as u16
-                | (target as u16) << 6
+                | ((target as u16) << 6)
                 | Self::PROMOTION
-                | (promoting_to as u16 - PieceKind::Knight as u16) << 12,
+                | ((promoting_to as u16 - PieceKind::Knight as u16) << 12),
         )
     }
 
     /// Creates a set of promotions from a pawn push.
     #[inline(always)]
     pub(crate) const fn new_promotions(origin: Square, target: Square) -> [Self; 4] {
-        let general_move = origin as u16 | (target as u16) << 6 | Self::PROMOTION;
+        let general_move = origin as u16 | ((target as u16) << 6) | Self::PROMOTION;
         [
             Self(general_move),
             Self(general_move | (1 << 12)),
@@ -105,17 +105,17 @@ impl Action {
     ) -> Self {
         Self(
             origin as u16
-                | (target as u16) << 6
+                | ((target as u16) << 6)
                 | Self::PROMOTION
                 | Self::CAPTURE
-                | (promoting_to as u16 - PieceKind::Knight as u16) << 12,
+                | ((promoting_to as u16 - PieceKind::Knight as u16) << 12),
         )
     }
 
     /// Creates a set of promotions from a pawn capture.
     #[inline(always)]
     pub(crate) const fn new_promotion_captures(origin: Square, target: Square) -> [Self; 4] {
-        let general_move = origin as u16 | (target as u16) << 6 | Self::PROMOTION | Self::CAPTURE;
+        let general_move = origin as u16 | ((target as u16) << 6) | Self::PROMOTION | Self::CAPTURE;
         [
             Self(general_move),
             Self(general_move | (1 << 12)),
@@ -127,16 +127,16 @@ impl Action {
     /// Creates an en passant capture.
     #[inline(always)]
     pub(crate) const fn new_en_passant(origin: Square, target: Square) -> Self {
-        Self(origin as u16 | (target as u16) << 6 | Self::CAPTURE | Self::SPECIAL_0)
+        Self(origin as u16 | ((target as u16) << 6) | Self::CAPTURE | Self::SPECIAL_0)
     }
 
     /// Creates an en passant queenside castle move.
     #[inline(always)]
     pub(crate) const fn new_queenside_castle(side: Colour) -> Self {
         if side.is_black() {
-            Self(Square::E8 as u16 | (Square::C8 as u16) << 6 | Self::SPECIAL_0 | Self::SPECIAL_1)
+            Self(Square::E8 as u16 | ((Square::C8 as u16) << 6) | Self::SPECIAL_0 | Self::SPECIAL_1)
         } else {
-            Self(Square::E1 as u16 | (Square::C1 as u16) << 6 | Self::SPECIAL_0 | Self::SPECIAL_1)
+            Self(Square::E1 as u16 | ((Square::C1 as u16) << 6) | Self::SPECIAL_0 | Self::SPECIAL_1)
         }
     }
 
@@ -144,9 +144,9 @@ impl Action {
     #[inline(always)]
     pub(crate) const fn new_kingside_castle(side: Colour) -> Self {
         if side.is_black() {
-            Self(Square::E8 as u16 | (Square::G8 as u16) << 6 | Self::SPECIAL_1)
+            Self(Square::E8 as u16 | ((Square::G8 as u16) << 6) | Self::SPECIAL_1)
         } else {
-            Self(Square::E1 as u16 | (Square::G1 as u16) << 6 | Self::SPECIAL_1)
+            Self(Square::E1 as u16 | ((Square::G1 as u16) << 6) | Self::SPECIAL_1)
         }
     }
 
@@ -330,9 +330,9 @@ impl PartialFromStr for UciMove {
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
         let (origin, s) =
-            Square::partial_from_str(s).map_err(|e| UciParseError::InvalidOriginSquare(e))?;
+            Square::partial_from_str(s).map_err(UciParseError::InvalidOriginSquare)?;
         let (target, s) =
-            Square::partial_from_str(s).map_err(|e| UciParseError::InvalidTargetSquare(e))?;
+            Square::partial_from_str(s).map_err(UciParseError::InvalidTargetSquare)?;
         let (promoting_to, s) = Option::<PromotionTarget>::partial_from_str(s).unwrap();
         Ok((
             Self {
@@ -523,7 +523,7 @@ impl PartialFromStr for SanMove {
                 .unwrap();
             let (origin_file, s) = Result::<File, FileParseError>::partial_from_str(s).unwrap();
             let (origin_rank, s) = Result::<Rank, RankParseError>::partial_from_str(s).unwrap();
-            let is_capture = s.chars().next() == Some('x');
+            let is_capture = s.starts_with('x');
             let s = if is_capture { &s[1..] } else { s };
             let ((target, s), origin_file, origin_rank) = match Square::partial_from_str(s) {
                 Ok(v) => (v, origin_file.ok(), origin_rank.ok()),
@@ -544,16 +544,15 @@ impl PartialFromStr for SanMove {
                         }
                         Err(e) => Err(SanParseError::InvalidOriginFile(e))?,
                     };
-                    let rank = origin_rank.map_err(|e| SanParseError::InvalidOriginRank(e))?;
+                    let rank = origin_rank.map_err(SanParseError::InvalidOriginRank)?;
                     ((Square::new(file, rank), s), None, None)
                 }
             };
 
-            let (promotion, s) = if s.chars().next() == Some('=') {
-                let after_eq = &s[1..];
-                match Option::<PromotionTarget>::partial_from_str(after_eq) {
+            let (promotion, s) = if let Some(left) = s.strip_prefix('=') {
+                match Option::<PromotionTarget>::partial_from_str(left) {
                     Ok(v) => v,
-                    Err(_) => (None, s),
+                    Err(_) => (None, left),
                 }
             } else {
                 Option::<PromotionTarget>::partial_from_str(s).unwrap()

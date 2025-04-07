@@ -450,10 +450,10 @@ impl Position {
             }
         };
 
-        return Some(SanMove {
+        Some(SanMove {
             move_kind,
             check: None,
-        });
+        })
     }
 
     /// Makes a move on the board, modifying the position.
@@ -1320,11 +1320,13 @@ impl Position {
     }
 
     /// Returns `true` if the NNUE accumulator should be refreshed.
+    #[allow(dead_code)]
     pub(crate) fn should_refresh_features(&self) -> bool {
         self.should_refresh
     }
 
     /// Clears accumulated NNUE features and refresh flag.
+    #[allow(dead_code)]
     pub(crate) fn clear_features(&mut self) {
         self.should_refresh = false;
         self.added_features.clear();
@@ -1332,6 +1334,7 @@ impl Position {
     }
 
     /// Returns a vector of active NNUE feature indices for this position.
+    #[allow(dead_code)]
     pub(crate) fn active_features(&self, perspective: Colour) -> Vec<u16> {
         let mut features = vec![];
         let king_square = self.king_square(perspective);
@@ -1354,11 +1357,13 @@ impl Position {
     }
 
     /// Returns accumulated added NNUE features.
+    #[allow(dead_code)]
     pub(crate) fn added_features(&self) -> &[u16] {
         &self.added_features
     }
 
     /// Returns accumulated removed NNUE features.
+    #[allow(dead_code)]
     pub(crate) fn removed_features(&self) -> &[u16] {
         &self.removed_features
     }
@@ -1460,16 +1465,6 @@ impl From<Fen> for Position {
 impl From<&Fen> for Position {
     fn from(value: &Fen) -> Self {
         Self::from_fen(value)
-    }
-}
-impl Into<Fen> for Position {
-    fn into(self) -> Fen {
-        self.fen()
-    }
-}
-impl Into<Fen> for &Position {
-    fn into(self) -> Fen {
-        self.fen()
     }
 }
 impl std::fmt::Debug for Position {

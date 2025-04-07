@@ -268,7 +268,7 @@ impl From<PieceKind> for Option<PromotionTarget> {
     fn from(value: PieceKind) -> Self {
         if value.is_valid_promotion_target() {
             // SAFETY: The internal representations are sure to match due to `repr(u8)`.
-            Some(unsafe { std::mem::transmute(value) })
+            Some(unsafe { std::mem::transmute::<PieceKind, PromotionTarget>(value) })
         } else {
             None
         }

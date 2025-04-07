@@ -59,7 +59,7 @@ pub fn parse_tag(src: &str) -> Result<(String, &str), ()> {
         _ => return Err(()),
     }
 
-    while let Some(c) = chars.next() {
+    for c in chars {
         if c.is_alphanumeric() || c == '_' {
             result.push(c)
         } else if c == ' ' {

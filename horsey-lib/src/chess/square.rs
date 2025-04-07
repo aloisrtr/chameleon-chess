@@ -276,6 +276,7 @@ impl Rank {
 impl std::ops::Add<Delta> for Rank {
     type Output = Rank;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn add(self, rhs: Delta) -> Self::Output {
         let delta_rank = (rhs as i8) / 8;
         unsafe { std::mem::transmute((self as u8).wrapping_add_signed(delta_rank)) }
@@ -441,7 +442,7 @@ impl Square {
     /// ```
     #[inline]
     pub const fn new(file: File, rank: Rank) -> Self {
-        unsafe { std::mem::transmute((rank as u8) << 3 | (file as u8)) }
+        unsafe { std::mem::transmute(((rank as u8) << 3) | (file as u8)) }
     }
 
     /// Instantitates a new square from its index.
@@ -560,8 +561,7 @@ impl Square {
     /// An iterator over all squares in a single file, from bottom to top.
     pub fn file_squares_iter(
         file: File,
-    ) -> impl Iterator<Item = Self>
-    + DoubleEndedIterator<Item = Self>
+    ) -> impl DoubleEndedIterator<Item = Self>
     + ExactSizeIterator<Item = Self>
     + FusedIterator<Item = Self> {
         Rank::iter().map(move |rank| Square::new(file, rank))
@@ -570,8 +570,7 @@ impl Square {
     /// An iterator over all squares in a single rank, from left to right.
     pub fn rank_squares_iter(
         rank: Rank,
-    ) -> impl Iterator<Item = Self>
-    + DoubleEndedIterator<Item = Self>
+    ) -> impl DoubleEndedIterator<Item = Self>
     + ExactSizeIterator<Item = Self>
     + FusedIterator<Item = Self> {
         File::iter().map(move |file| Square::new(file, rank))
@@ -644,8 +643,8 @@ impl PartialFromStr for Square {
     type Err = SquareParseError;
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
-        let (file, s) = File::partial_from_str(s).map_err(|e| SquareParseError::InvalidFile(e))?;
-        let (rank, s) = Rank::partial_from_str(s).map_err(|e| SquareParseError::InvalidRank(e))?;
+        let (file, s) = File::partial_from_str(s).map_err(SquareParseError::InvalidFile)?;
+        let (rank, s) = Rank::partial_from_str(s).map_err(SquareParseError::InvalidRank)?;
         Ok((Square::new(file, rank), s))
     }
 }

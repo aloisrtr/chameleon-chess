@@ -17,6 +17,7 @@ use super::{
     castling_rights::{CastlingParseError, CastlingRights},
     colour::{Colour, NUM_COLOURS},
     piece::{NUM_PIECES, Piece, PieceKind, PieceParseError},
+    position::Position,
     square::{File, Square, SquareParseError},
 };
 
@@ -76,6 +77,17 @@ impl Fen {
         None
     }
 
+    /// Returns the full en passant target square in this position, if any.
+    pub fn en_passant_square(&self) -> Option<Square> {
+        if self.side_to_move.is_black() {
+            self.en_passant_file
+                .map(|file| Square::new(file, Rank::Three))
+        } else {
+            self.en_passant_file
+                .map(|file| Square::new(file, Rank::Six))
+        }
+    }
+
     /// Compresses a FEN string for efficient storage.
     #[cfg(feature = "serde")]
     pub fn compress<W: BitWrite>(&self, stream: &mut W) -> std::io::Result<()> {
@@ -95,7 +107,7 @@ impl Fen {
 
         stream.write_bit(self.side_to_move.is_black())?;
 
-        stream.write_bit(self.en_passant.is_some())?;
+        stream.write_bit(self.en_passant_file.is_some())?;
         let white_candis = (self.bitboards[Colour::White as usize]
             & self.bitboards[PieceKind::Pawn as usize + 2]
             & Rank::Four.bitboard())
@@ -108,7 +120,7 @@ impl Fen {
         stream.write(
             candis.cardinality() as u32,
             u64::from(
-                self.en_passant
+                self.en_passant_square()
                     .map(|ep_square| ep_square.bitboard())
                     .unwrap_or(Bitboard::empty())
                     .pext(candis),
@@ -148,7 +160,7 @@ impl Fen {
         let en_passant = if stream.read_bit()? {
             let white_candis = (bitboards[Colour::White as usize]
                 & bitboards[PieceKind::Pawn as usize + 2]
-                & Rank::Four.bitboard())
+                & Rank::Three.bitboard())
                 << 8;
             let black_candis = (bitboards[Colour::Black as usize]
                 & bitboards[PieceKind::Pawn as usize + 2]
@@ -183,7 +195,7 @@ impl Fen {
         Ok(Fen {
             bitboards,
             side_to_move,
-            en_passant,
+            en_passant_file: en_passant.map(|sq| sq.file()),
             castling_rights,
             halfmove_clock,
             fullmove_counter: 1,
@@ -278,7 +290,7 @@ impl PartialFromStr for Fen {
                     break;
                 } else {
                     let (piece, left) =
-                        Piece::partial_from_str(s).map_err(|e| FenParseError::InvalidPiece(e))?;
+                        Piece::partial_from_str(s).map_err(FenParseError::InvalidPiece)?;
                     let square = squares.next().unwrap();
                     bitboards[NUM_COLOURS + piece.kind as usize].set(square);
                     bitboards[piece.colour as usize].set(square);
@@ -309,15 +321,15 @@ impl PartialFromStr for Fen {
         let s = &s[1..];
 
         let s = parse_char(s, ' ').map_err(|_| FenParseError::MissingSeparator)?;
-        let (castling_rights, s) = CastlingRights::partial_from_str(s)
-            .map_err(|e| FenParseError::InvalidCastlingRights(e))?;
+        let (castling_rights, s) =
+            CastlingRights::partial_from_str(s).map_err(FenParseError::InvalidCastlingRights)?;
 
         let s = parse_char(s, ' ').map_err(|_| FenParseError::MissingSeparator)?;
         let (en_passant_file, s) = match s.chars().next() {
             Some('-') => (None, &s[1..]),
             _ => {
-                let (sq, s) = Square::partial_from_str(s)
-                    .map_err(|e| FenParseError::InvalidEnPassantSquare(e))?;
+                let (sq, s) =
+                    Square::partial_from_str(s).map_err(FenParseError::InvalidEnPassantSquare)?;
                 if (sq.rank() != Rank::Three && side_to_move.is_black())
                     || (sq.rank() != Rank::Six && side_to_move.is_white())
                 {
@@ -433,18 +445,27 @@ impl std::fmt::Debug for Fen {
         )
     }
 }
+impl From<Position> for Fen {
+    fn from(p: Position) -> Fen {
+        p.fen()
+    }
+}
+impl From<&Position> for Fen {
+    fn from(p: &Position) -> Fen {
+        p.fen()
+    }
+}
 
 #[cfg(test)]
 mod test {
-    #[cfg(feature = "serde")]
-    use bitstream_io::{BigEndian, BitReader, BitWriter};
-
-    #[cfg(feature = "serde")]
-    use super::*;
 
     #[test]
     #[cfg(feature = "serde")]
     fn compress_decompress_ok() {
+        use super::*;
+        use bitstream_io::{BigEndian, BitReader, BitWriter};
+        use std::io::Cursor;
+
         let fen: Fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
             .parse()
             .unwrap();

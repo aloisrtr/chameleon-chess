@@ -1,3 +1,4 @@
+//! # Representation of sets of squares.
 //! Bitboards are an efficient way to represent sets of up to 64 elements,
 //! and are used extensively in the board representation.
 
@@ -196,7 +197,7 @@ impl Bitboard {
         Self(self.0 & other.0)
     }
 
-    /// Applies shifts all bits of the bitboard in the given direction.
+    /// Shifts all bits of the bitboard in the given direction.
     #[inline]
     pub const fn shift(&self, delta: Delta) -> Self {
         Self(if 0 < delta as i8 {
@@ -206,7 +207,7 @@ impl Bitboard {
         })
     }
 
-    /// Inverts the bitboard.
+    /// Inverts the bitboard (set bits become unset and vice-versa).
     #[inline]
     pub const fn invert(&self) -> Self {
         Self(!self.0)
@@ -564,16 +565,20 @@ impl ExactSizeIterator for Bitboard {
         self.cardinality() as usize
     }
 }
-
-impl std::fmt::Debug for Bitboard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for rank in Rank::iter().rev() {
-            for square in Square::rank_squares_iter(rank) {
-                write!(f, "{} ", if self.is_set(square) { 'x' } else { '.' })?
-            }
-            writeln!(f)?
+impl FromIterator<Square> for Bitboard {
+    fn from_iter<T: IntoIterator<Item = Square>>(iter: T) -> Self {
+        let mut bb = Self::default();
+        for sq in iter {
+            bb.set(sq);
         }
-        Ok(())
+        bb
+    }
+}
+impl Extend<Square> for Bitboard {
+    fn extend<T: IntoIterator<Item = Square>>(&mut self, iter: T) {
+        for sq in iter {
+            self.set(sq);
+        }
     }
 }
 
@@ -595,6 +600,49 @@ impl From<u64> for Bitboard {
 impl From<&u64> for Bitboard {
     fn from(value: &u64) -> Self {
         Self(*value)
+    }
+}
+
+impl std::fmt::Debug for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for rank in Rank::iter().rev() {
+            for square in Square::rank_squares_iter(rank) {
+                write!(f, "{} ", if self.is_set(square) { '1' } else { '0' })?
+            }
+            writeln!(f)?
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Display for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for rank in Rank::iter().rev() {
+            for square in Square::rank_squares_iter(rank) {
+                write!(f, "{} ", if self.is_set(square) { 'x' } else { '.' })?
+            }
+            writeln!(f)?
+        }
+        Ok(())
+    }
+}
+impl std::fmt::UpperHex for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:X}", self.0)
+    }
+}
+impl std::fmt::LowerHex for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:x}", self.0)
+    }
+}
+impl std::fmt::Octal for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:o}", self.0)
+    }
+}
+impl std::fmt::Binary for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:b}", self.0)
     }
 }
 
@@ -626,5 +674,16 @@ mod test {
         assert_eq!(bb + Delta::NorthWest, bb - Delta::SouthEast);
         assert_eq!(bb + Delta::SouthEast, bb - Delta::NorthWest);
         assert_eq!(bb + Delta::SouthWest, bb - Delta::NorthEast);
+    }
+
+    #[test]
+    fn is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<Bitboard>();
+    }
+    #[test]
+    fn is_sync() {
+        fn assert_sync<T: Send>() {}
+        assert_sync::<Bitboard>();
     }
 }

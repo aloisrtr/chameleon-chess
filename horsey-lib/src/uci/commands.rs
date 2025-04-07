@@ -23,7 +23,7 @@ pub enum UciError<'a> {
         expected: &'static str,
     },
 }
-impl<'a> std::fmt::Display for UciError<'a> {
+impl std::fmt::Display for UciError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownCommandVerb(s) => write!(f, "Unknown command verb: {s}"),

@@ -281,7 +281,7 @@ impl PartialFromStr for EpdOperand {
                 .map_err(|_| EpdOperandParseError::InvalidUnsignedInt),
             Some(_) => SanMove::partial_from_str(s)
                 .map(|(m, s)| (Self::Move(m), s))
-                .map_err(|e| EpdOperandParseError::InvalidSanMove(e)),
+                .map_err(EpdOperandParseError::InvalidSanMove),
             None => Err(EpdOperandParseError::EmptyInput),
         }
     }
@@ -368,7 +368,7 @@ impl PartialFromStr for EpdOperation {
 
     fn partial_from_str(s: &str) -> Result<(Self, &str), Self::Err> {
         let (opcode, s) =
-            EpdOpCode::partial_from_str(s).map_err(|e| EpdOperationParseError::InvalidOpCode(e))?;
+            EpdOpCode::partial_from_str(s).map_err(EpdOperationParseError::InvalidOpCode)?;
 
         let mut operands = vec![];
         let s = if let Ok(mut s) = parse_char(s, ' ') {

@@ -11,6 +11,7 @@
 //! values:
 //! - The parsed value
 //! - A suffix of the input that was not part of the parsed value.
+//!
 //! A string like "d4rest" would return `Ok(Square::D4, "rest")` when parsed.
 //!
 //! Using this parsing scheme allows the combination of parsers over a large input
@@ -58,7 +59,7 @@ pub(crate) fn parse_string(src: &str) -> Result<(String, &str), ()> {
 
     let mut escaped = false;
     let mut escaped_count = 0;
-    while let Some(c) = chars.next() {
+    for c in chars {
         match c {
             '"' if !escaped => break,
             '\\' if !escaped => escaped = true,
