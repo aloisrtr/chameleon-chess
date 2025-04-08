@@ -19,10 +19,10 @@ pub enum CastlingKind {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CastlingRights(u8);
 impl CastlingRights {
-    const KINGSIDE_BLACK: u8 = 0b0001;
-    const QUEENSIDE_BLACK: u8 = 0b0010;
-    const KINGSIDE_WHITE: u8 = 0b0100;
-    const QUEENSIDE_WHITE: u8 = 0b1000;
+    const KINGSIDE_BLACK: u8 = 0b0100;
+    const QUEENSIDE_BLACK: u8 = 0b1000;
+    const KINGSIDE_WHITE: u8 = 0b0001;
+    const QUEENSIDE_WHITE: u8 = 0b0010;
     const FULL: u8 =
         Self::KINGSIDE_BLACK | Self::KINGSIDE_WHITE | Self::QUEENSIDE_BLACK | Self::QUEENSIDE_WHITE;
     const EMPTY: u8 = 0;

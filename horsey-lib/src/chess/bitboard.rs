@@ -747,13 +747,7 @@ impl From<&u64> for Bitboard {
 
 impl std::fmt::Debug for Bitboard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for rank in Rank::iter().rev() {
-            for square in Square::rank_squares_iter(rank) {
-                write!(f, "{} ", if self.is_set(square) { '1' } else { '0' })?
-            }
-            writeln!(f)?
-        }
-        Ok(())
+        write!(f, "{self:x}")
     }
 }
 impl std::fmt::Display for Bitboard {

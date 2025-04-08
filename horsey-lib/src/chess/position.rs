@@ -99,7 +99,7 @@ impl AttackInformation {
 
 /// Represents a valid chess position and defines an API to interact with said
 /// position (making, unmaking, generating moves, etc).
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Position {
     // 8x8 array to find which piece sits on which square.
     pieces: [Option<PieceKind>; 64],
@@ -521,7 +521,11 @@ impl Position {
 
         // Reset en passant file if any
         if let Some(en_passant_file) = self.en_passant_file.take() {
-            self.hash ^= zobrist::en_passant_file_hash(en_passant_file)
+            self.hash ^= zobrist::en_passant_file_hash(
+                en_passant_file,
+                self.piece_bitboard(PieceKind::Pawn) & self.color_bitboard(self.side_to_move),
+                self.side_to_move,
+            )
         }
 
         // Modify castling rights if needed
@@ -639,7 +643,12 @@ impl Position {
             self.reversible_moves = 0
         } else if mv.special_0_is_set() {
             self.en_passant_file = Some(origin.file());
-            self.hash ^= zobrist::en_passant_file_hash(origin.file());
+            self.hash ^= zobrist::en_passant_file_hash(
+                origin.file(),
+                self.piece_bitboard(PieceKind::Pawn)
+                    & self.color_bitboard(self.side_to_move.inverse()),
+                self.side_to_move.inverse(),
+            );
             self.reversible_moves = 0
         } else if moving_kind != PieceKind::Pawn {
             self.reversible_moves += 1
@@ -1427,12 +1436,16 @@ impl Position {
         }
 
         self.hash ^= self.castling_rights.zobrist_hash();
-        if self.side_to_move.is_black() {
+        if self.side_to_move.is_white() {
             self.hash ^= zobrist::side_to_move_hash();
         }
 
-        if let Some(ep) = self.en_passant_file {
-            self.hash ^= zobrist::en_passant_file_hash(ep)
+        if let Some(ep_file) = self.en_passant_file {
+            self.hash ^= zobrist::en_passant_file_hash(
+                ep_file,
+                self.piece_bitboard(PieceKind::Pawn) & self.color_bitboard(self.side_to_move),
+                self.side_to_move,
+            )
         }
     }
 }
@@ -1451,7 +1464,7 @@ impl From<&Fen> for Position {
         Self::from_fen(value)
     }
 }
-impl std::fmt::Debug for Position {
+impl std::fmt::Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (r, rank) in Rank::iter().rev().enumerate() {
             for sq in Square::rank_squares_iter(rank) {
@@ -1488,25 +1501,34 @@ impl std::fmt::Debug for Position {
         writeln!(f, "\nfen: {}", self.fen())
     }
 }
-impl std::fmt::Display for Position {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
 
 #[cfg(test)]
 mod test {
-    use crate::chess::{action::Action, square::Square};
+    use crate::chess::{
+        action::Action,
+        fen::Fen,
+        square::{File, Square},
+    };
 
     use super::Position;
 
     #[test]
     fn hash_test() {
-        let mut pos = Position::initial();
+        let mut pos = Position::from(
+            Fen::parse("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1").unwrap(),
+        );
         let og_hash = pos.zobrist_hash();
-        pos.make(&Action::new_double_push(Square::E2, Square::E4))
+        pos.make(&Action::new_double_push(Square::E7, Square::E5))
             .unwrap();
         pos.unmake();
         assert_eq!(og_hash, pos.zobrist_hash())
+    }
+
+    #[test]
+    fn zeiodj() {
+        assert_eq!(
+            std::mem::size_of::<Option<File>>(),
+            std::mem::size_of::<Option<Option<File>>>()
+        )
     }
 }

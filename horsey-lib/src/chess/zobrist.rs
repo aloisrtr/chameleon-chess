@@ -1,13 +1,15 @@
 //! # Zobrist hashing keys and utilities
 
 use super::{
+    bitboard::Bitboard,
     colour::Colour,
     piece::PieceKind,
-    square::{File, Square},
+    square::{Delta, File, Rank, Square},
 };
 
 // The Zobrist keys are taken from the [PolyGlot format implementation](https://github.com/ulthiel/polyglot/blob/master/random.c)
 // so as to avoid requiring two sets of keys.
+// WARN: CHANGING THESE OR THE HASH COMPUTATION WILL BREAK POLYGLOT!
 pub static ZOBRIST_KEYS: [u64; 781] = [
     0x9D39247E33776D41,
     0x2AF7398005AAA5C7,
@@ -792,28 +794,91 @@ pub static ZOBRIST_KEYS: [u64; 781] = [
     0xF8D626AAAF278509,
 ];
 
-// We need :
-// - one number from piece on each square (64 * 12)
-// - one number for side to move
-// - four numbers for castling rights
-// - eight numbers for en passant file
 #[inline(always)]
-pub fn piece_hash(kind: PieceKind, colour: Colour, square: Square) -> u64 {
-    let piece_offset = kind as usize * square as usize;
-    if colour.is_black() {
-        ZOBRIST_KEYS[piece_offset + 64 * 6]
+pub const fn piece_hash(kind: PieceKind, colour: Colour, square: Square) -> u64 {
+    let rank = square.rank() as usize;
+    let file = square.file() as usize;
+    let piece = kind as usize * 2 + if colour.is_white() { 1 } else { 0 };
+    ZOBRIST_KEYS[64 * piece + 8 * rank + file]
+}
+
+pub const CASTLING_RIGHTS_OFFSET: usize = 768;
+pub const EN_PASSANT_OFFSET: usize = 772;
+pub const SIDE_TO_MOVE_OFFSET: usize = 780;
+
+#[inline(always)]
+pub const fn side_to_move_hash() -> u64 {
+    ZOBRIST_KEYS[SIDE_TO_MOVE_OFFSET]
+}
+#[inline(always)]
+pub const fn en_passant_file_hash(file: File, pawns_bb: Bitboard, side_to_move: Colour) -> u64 {
+    let rank_bb = if side_to_move.is_white() {
+        Rank::Five
     } else {
-        ZOBRIST_KEYS[piece_offset]
+        Rank::Four
+    }
+    .bitboard();
+
+    let file_bb = file.bitboard();
+    let mask = rank_bb.intersection(file_bb.shift(Delta::West).union(file_bb.shift(Delta::East)));
+    if mask.intersection(pawns_bb).is_not_empty() {
+        ZOBRIST_KEYS[EN_PASSANT_OFFSET + file as usize]
+    } else {
+        0
     }
 }
 
-pub const CASTLING_RIGHTS_OFFSET: usize = 64 * 12 + 1;
+#[cfg(test)]
+mod tests {
+    use crate::chess::{fen::Fen, position::Position};
 
-#[inline(always)]
-pub fn side_to_move_hash() -> u64 {
-    ZOBRIST_KEYS[64 * 12]
-}
-#[inline(always)]
-pub fn en_passant_file_hash(file: File) -> u64 {
-    ZOBRIST_KEYS[64 * 12 + 5 + file as usize]
+    #[test]
+    fn polyglot_hash_match() {
+        const FENS: [(&str, u64); 9] = [
+            (
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                0x463b96181691fc9c,
+            ),
+            (
+                "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+                0x823c9b50fd114196,
+            ),
+            (
+                "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2",
+                0x0756b94461c50fb0,
+            ),
+            (
+                "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2",
+                0x662fafb965db29d4,
+            ),
+            (
+                "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
+                0x22a48b5a8e47ff78,
+            ),
+            (
+                "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPPKPPP/RNBQ1BNR b kq - 0 3",
+                0x652a607ca3f242c1,
+            ),
+            (
+                "rnbq1bnr/ppp1pkpp/8/3pPp2/8/8/PPPPKPPP/RNBQ1BNR w - - 0 4",
+                0x00fdd303c946bdd9,
+            ),
+            (
+                "rnbqkbnr/p1pppppp/8/8/PpP4P/8/1P1PPPP1/RNBQKBNR b KQkq c3 0 3",
+                0x3c8123ea7b067637,
+            ),
+            (
+                "rnbqkbnr/p1pppppp/8/8/P6P/R1p5/1P1PPPP1/1NBQKBNR b Kkq - 0 4",
+                0x5c3f9b829b279560,
+            ),
+        ];
+
+        for (fen, expected) in FENS {
+            let hash = Position::from(Fen::parse(fen).unwrap()).zobrist_hash();
+            assert_eq!(
+                hash, expected,
+                "Hashes for \"{fen}\" do not match: expected {expected:0x}, got {hash:0x}"
+            )
+        }
+    }
 }
