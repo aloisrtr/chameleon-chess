@@ -11,20 +11,32 @@ use super::position::Position;
 pub struct PerftConfig {
     /// Maximum depth to reach.
     pub depth: u8,
-    /// Whether to run perft for each level iteratively.
+    /// Whether to run perft for each level iteratively (default: `false`).
     pub iterative: bool,
-    /// Whether to count legal moves on horizon nodes or play them.
+    /// Whether to count legal moves on horizon nodes or play them (default: `false`).
     pub bulk_counting: bool,
-    /// Divides perft results, showing them for each move at depth 1.
+    /// Divides perft results, showing them for each move at depth 1 (default: `false`).
     pub divide: bool,
 
-    /// Enables benchmarking time and nodes-per-second.
+    /// Enables benchmarking time and nodes-per-second (default: `false`)
     pub bench: bool,
 
-    /// ASCII print of the board.
+    /// ASCII print of the board, should be disabled when trying to parse the output (default: `false`).
     pub show_board: bool,
 }
 impl PerftConfig {
+    /// Initiates a new [`PerftConfig`] with the given maximum depth.
+    pub fn new(depth: u8) -> Self {
+        Self {
+            depth,
+            iterative: false,
+            bulk_counting: false,
+            divide: false,
+            bench: false,
+            show_board: false,
+        }
+    }
+
     /// Whether to show the board and ASCII art at the start of the test.
     ///
     /// Should be disabled when trying to parse the output.
@@ -64,7 +76,7 @@ impl PerftConfig {
     }
 
     /// Runs a Perft test on the given position with the set configuration.
-    pub fn go(&self, position: &mut Position) {
+    pub fn go(&self, position: &mut Position) -> u64 {
         if self.show_board {
             println!(
                 r"
@@ -83,15 +95,16 @@ impl PerftConfig {
             println!("====== DEPTH 1 ======")
         }
 
+        let mut nodes = 0u64;
         for depth in (if self.iterative { 1 } else { self.depth })..=self.depth {
             let start = Instant::now();
-            let nodes: u64 = position
+            nodes = position
                 .actions()
                 .iter()
                 .map(|&mv| {
                     // SAFETY: just generated
                     unsafe { position.make_unchecked(mv) };
-                    let mv_nodes = perft_rec(position, depth - 1, self.bulk_counting);
+                    let mv_nodes = perft(position, depth - 1, self.bulk_counting);
                     position.unmake();
                     if self.divide {
                         println!("{mv}: {mv_nodes} nodes");
@@ -113,12 +126,13 @@ impl PerftConfig {
                 println!("\n====== DEPTH {} ======", depth + 1)
             }
         }
+        nodes
     }
 }
 
 /// Traverses all nodes accessible from a given position, returning the number of
 /// nodes traversed.
-fn perft_rec(position: &mut Position, depth_left: u8, bulk_counting: bool) -> u64 {
+pub fn perft(position: &mut Position, depth_left: u8, bulk_counting: bool) -> u64 {
     if depth_left == 0 {
         1
     } else if depth_left == 1 && bulk_counting {
@@ -130,7 +144,7 @@ fn perft_rec(position: &mut Position, depth_left: u8, bulk_counting: bool) -> u6
             .map(|&mv| {
                 // SAFETY: just generated
                 unsafe { position.make_unchecked(mv) };
-                let mv_nodes = perft_rec(position, depth_left - 1, bulk_counting);
+                let mv_nodes = perft(position, depth_left - 1, bulk_counting);
                 position.unmake();
                 mv_nodes
             })
@@ -168,7 +182,7 @@ mod test {
 
     fn check_matching(position: &mut Position, expected: &[u64]) {
         for (depth, expected) in expected.into_iter().enumerate() {
-            let actual = perft_rec(position, depth as u8 + 1, true);
+            let actual = perft(position, depth as u8 + 1, true);
             assert_eq!(
                 actual,
                 *expected,

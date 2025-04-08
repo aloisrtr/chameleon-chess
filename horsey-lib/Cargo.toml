@@ -8,19 +8,26 @@ description = "Efficient and complete chess library."
 
 [dependencies]
 rand = { version = "0.9", default-features = false, features = ["small_rng"] }
-log = { version = "0.4", default-features = false, optional = true }
-num_cpus = { version = "1.16", default-features = false }
 heapless = { version = "0.8", default-features = false }
 
+num_cpus = { version = "1.16", default-features = false, optional = true }
+log = { version = "0.4", default-features = false, optional = true }
 serde = { version = "1", default-features = false, features = ["derive"], optional = true }
 bitstream-io = { version = "2.6", default-features = false, optional = true }
 
 [features]
 default = []
-uci-client = []
-uci-server = []
+uci = ["dep:num_cpus"]
 pgn = []
 epd = []
+search = []
+brain = []
 log = ["dep:log"]
 serde = ["dep:serde", "dep:bitstream-io"]
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "movegen"
+harness = false

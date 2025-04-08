@@ -3,7 +3,8 @@
 //! This includes making, unmaking and generating moves, defining positions from
 //! FEN strings, etc.
 
-use crate::brain::feature::{feature_index, piece_feature_index};
+#[cfg(feature = "brain")]
+use crate::brain::feature::NnueFeatures;
 use std::hint::unreachable_unchecked;
 
 use super::{
@@ -19,7 +20,7 @@ use super::{
     zobrist,
 };
 
-pub type ActionList = heapless::Vec<Action, 256>;
+pub type ActionList = heapless::Vec<Action, 255>;
 
 /// Indicates that an illegal move was played.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
@@ -78,7 +79,7 @@ impl AttackInformation {
     /// Returns the number of checking pieces.
     #[inline(always)]
     pub fn checkers_count(&self) -> u8 {
-        self.checkers.cardinality()
+        self.checkers.len()
     }
 
     /// Returns `true` if there is at least one checker. Combined with [`Position::actions`],
@@ -113,10 +114,8 @@ pub struct Position {
     history: Vec<HistoryEntry>,
     hash: u64,
 
-    // NNUE
-    added_features: Vec<u16>,
-    removed_features: Vec<u16>,
-    should_refresh: bool,
+    #[cfg(feature = "brain")]
+    nnue_features: NnueFeatures,
 }
 impl Default for Position {
     /// A position with no pieces.
@@ -132,9 +131,8 @@ impl Default for Position {
             history: Vec::new(),
             hash: 0,
 
-            added_features: vec![],
-            removed_features: vec![],
-            should_refresh: true,
+            #[cfg(feature = "brain")]
+            nnue_features: Default::default(),
         }
     }
 }
@@ -170,10 +168,7 @@ impl Position {
             en_passant_file: fen.en_passant_file,
             history: Vec::new(),
             hash: 0,
-
-            added_features: vec![],
-            removed_features: vec![],
-            should_refresh: true,
+            ..Default::default()
         };
         pos.rehash();
 
@@ -230,7 +225,8 @@ impl Position {
         self.pieces[on as usize] = Some(kind);
 
         self.hash ^= zobrist::piece_hash(kind, colour, on);
-        self.add_piece_feature(kind, on, colour)
+        #[cfg(feature = "brain")]
+        self.nnue_features.add_piece_feature(kind, on, colour)
     }
 
     /// Returns the piece kind and color present on a given square if any.
@@ -470,12 +466,12 @@ impl Position {
     }
 
     #[inline(always)]
-    fn occupied_squares(&self) -> Bitboard {
+    pub fn occupied_squares(&self) -> Bitboard {
         self.color_bitboard(Colour::White) | self.color_bitboard(Colour::Black)
     }
 
     #[inline(always)]
-    fn piece_bitboard(&self, kind: PieceKind) -> Bitboard {
+    pub fn piece_bitboard(&self, kind: PieceKind) -> Bitboard {
         unsafe { *self.bitboards.get_unchecked(kind as usize + 2) }
     }
 
@@ -485,7 +481,7 @@ impl Position {
     }
 
     #[inline(always)]
-    fn color_bitboard(&self, colour: Colour) -> Bitboard {
+    pub fn color_bitboard(&self, colour: Colour) -> Bitboard {
         unsafe { *self.bitboards.get_unchecked(colour as usize) }
     }
 
@@ -509,7 +505,10 @@ impl Position {
                 .get_unchecked(origin as usize)
                 .unwrap_unchecked()
         };
-        self.should_refresh |= moving_kind == PieceKind::King;
+        #[cfg(feature = "brain")]
+        if moving_kind == PieceKind::King {
+            self.nnue_features.queue_refresh();
+        }
 
         self.history.push(HistoryEntry {
             played: mv,
@@ -553,8 +552,13 @@ impl Position {
             }
             self.hash ^= zobrist::piece_hash(moving_kind, self.side_to_move, origin);
             self.hash ^= zobrist::piece_hash(to, self.side_to_move, origin);
-            self.add_piece_feature(to, origin, self.side_to_move);
-            self.remove_piece_feature(moving_kind, origin, self.side_to_move);
+            #[cfg(feature = "brain")]
+            {
+                self.nnue_features
+                    .add_piece_feature(to, origin, self.side_to_move);
+                self.nnue_features
+                    .remove_piece_feature(moving_kind, origin, self.side_to_move);
+            }
             moving_kind = to;
 
             if mv.is_capture() {
@@ -566,7 +570,12 @@ impl Position {
                 *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
                 *self.piece_bitboard_mut(captured) ^= target.bitboard();
                 self.hash ^= zobrist::piece_hash(captured, self.side_to_move.inverse(), target);
-                self.remove_piece_feature(captured, target, self.side_to_move.inverse())
+                #[cfg(feature = "brain")]
+                self.nnue_features.remove_piece_feature(
+                    captured,
+                    target,
+                    self.side_to_move.inverse(),
+                )
             }
             self.reversible_moves = 0
         } else if mv.is_capture() {
@@ -589,7 +598,9 @@ impl Position {
             *self.color_bitboard_mut(self.side_to_move.inverse()) ^= target.bitboard();
             *self.piece_bitboard_mut(captured) ^= target.bitboard();
             self.hash ^= zobrist::piece_hash(captured, self.side_to_move.inverse(), target);
-            self.remove_piece_feature(captured, target, self.side_to_move.inverse());
+            #[cfg(feature = "brain")]
+            self.nnue_features
+                .remove_piece_feature(captured, target, self.side_to_move.inverse());
             self.reversible_moves = 0
         } else if mv.special_1_is_set() {
             let (rook_origin, rook_target) = if mv.special_0_is_set() {
@@ -612,8 +623,19 @@ impl Position {
             }
             self.hash ^= zobrist::piece_hash(PieceKind::Rook, self.side_to_move, rook_origin);
             self.hash ^= zobrist::piece_hash(PieceKind::Rook, self.side_to_move, rook_target);
-            self.add_piece_feature(PieceKind::Rook, rook_target, self.side_to_move);
-            self.remove_piece_feature(PieceKind::Rook, rook_origin, self.side_to_move);
+            #[cfg(feature = "brain")]
+            {
+                self.nnue_features.add_piece_feature(
+                    PieceKind::Rook,
+                    rook_target,
+                    self.side_to_move,
+                );
+                self.nnue_features.remove_piece_feature(
+                    PieceKind::Rook,
+                    rook_origin,
+                    self.side_to_move,
+                );
+            }
             self.reversible_moves = 0
         } else if mv.special_0_is_set() {
             self.en_passant_file = Some(origin.file());
@@ -634,9 +656,13 @@ impl Position {
         }
         self.hash ^= zobrist::piece_hash(moving_kind, self.side_to_move, origin);
         self.hash ^= zobrist::piece_hash(moving_kind, self.side_to_move, target);
-        self.add_piece_feature(moving_kind, target, self.side_to_move);
-        self.remove_piece_feature(moving_kind, origin, self.side_to_move);
-
+        #[cfg(feature = "brain")]
+        {
+            self.nnue_features
+                .add_piece_feature(moving_kind, target, self.side_to_move);
+            self.nnue_features
+                .remove_piece_feature(moving_kind, origin, self.side_to_move);
+        }
         self.side_to_move.invert();
         self.hash ^= zobrist::side_to_move_hash();
     }
@@ -678,8 +704,14 @@ impl Position {
         };
         *self.color_bitboard_mut(self.side_to_move) ^= move_bitboard;
         *self.piece_bitboard_mut(moving_kind) ^= move_bitboard;
-        self.add_piece_feature(moving_kind, origin, self.side_to_move);
-        self.remove_piece_feature(moving_kind, target, self.side_to_move);
+
+        #[cfg(feature = "brain")]
+        {
+            self.nnue_features
+                .add_piece_feature(moving_kind, origin, self.side_to_move);
+            self.nnue_features
+                .remove_piece_feature(moving_kind, target, self.side_to_move);
+        }
 
         // And deal with move kind specifics
         if let Some(to) = played.promotion_target() {
@@ -688,8 +720,14 @@ impl Position {
             unsafe {
                 *self.pieces.get_unchecked_mut(origin as usize) = Some(PieceKind::Pawn);
             }
-            self.add_piece_feature(PieceKind::Pawn, origin, self.side_to_move);
-            self.remove_piece_feature(to, origin, self.side_to_move);
+
+            #[cfg(feature = "brain")]
+            {
+                self.nnue_features
+                    .add_piece_feature(PieceKind::Pawn, origin, self.side_to_move);
+                self.nnue_features
+                    .remove_piece_feature(to, origin, self.side_to_move);
+            }
 
             if played.is_capture() {
                 let Some(captured) = captured else {
@@ -700,7 +738,9 @@ impl Position {
                 unsafe {
                     *self.pieces.get_unchecked_mut(target as usize) = Some(captured);
                 }
-                self.add_piece_feature(captured, target, self.side_to_move.inverse())
+                #[cfg(feature = "brain")]
+                self.nnue_features
+                    .add_piece_feature(captured, target, self.side_to_move.inverse())
             }
         } else if played.is_capture() {
             let target = if played.special_0_is_set() {
@@ -720,7 +760,9 @@ impl Position {
             unsafe {
                 *self.pieces.get_unchecked_mut(target as usize) = Some(captured);
             }
-            self.add_piece_feature(captured, target, self.side_to_move.inverse());
+            #[cfg(feature = "brain")]
+            self.nnue_features
+                .add_piece_feature(captured, target, self.side_to_move.inverse());
         } else if played.special_1_is_set() {
             let (rook_origin, rook_target) = if played.special_0_is_set() {
                 if self.side_to_move.is_black() {
@@ -740,8 +782,19 @@ impl Position {
                 *self.pieces.get_unchecked_mut(rook_origin as usize) =
                     self.pieces.get_unchecked_mut(rook_target as usize).take()
             };
-            self.add_piece_feature(PieceKind::Rook, rook_origin, self.side_to_move);
-            self.remove_piece_feature(PieceKind::Rook, rook_target, self.side_to_move);
+            #[cfg(feature = "brain")]
+            {
+                self.nnue_features.add_piece_feature(
+                    PieceKind::Rook,
+                    rook_origin,
+                    self.side_to_move,
+                );
+                self.nnue_features.remove_piece_feature(
+                    PieceKind::Rook,
+                    rook_target,
+                    self.side_to_move,
+                );
+            }
         }
     }
 
@@ -832,7 +885,7 @@ impl Position {
                     // add it to the movable pins
                     if checkers.is_empty() {
                         // SAFETY: we already checked that there is a set square.
-                        let pinned_square = unsafe { pin.lowest_set_square_unchecked() };
+                        let pinned_square = unsafe { pin.lowest_square_unchecked() };
 
                         let Some(kind) = self.pieces[pinned_square as usize] else {
                             panic!(
@@ -874,7 +927,7 @@ impl Position {
                     // add it to the movable pins
                     if checkers.is_empty() {
                         // SAFETY: we already checked that there is a set square.
-                        let pinned_square = unsafe { pin.lowest_set_square_unchecked() };
+                        let pinned_square = unsafe { pin.lowest_square_unchecked() };
 
                         let Some(kind) = self.pieces[pinned_square as usize] else {
                             panic!(
@@ -1204,7 +1257,7 @@ impl Position {
         };
         let captured = file.bitboard() & capture_rank;
         // SAFETY: we know that there is at least one set square.
-        let target = unsafe { (file.bitboard() & target_rank).lowest_set_square_unchecked() };
+        let target = unsafe { (file.bitboard() & target_rank).lowest_square_unchecked() };
 
         if captured.intersects(capturable) || movable.is_set(target) {
             let ennemy_orthogonals = (self.piece_bitboard(PieceKind::Queen)
@@ -1214,11 +1267,11 @@ impl Position {
             let west_attacker = ((captured & !File::A.bitboard()) + Delta::West) & pawns;
 
             if !capture_rank.is_set(self.king_square(self.side_to_move)) {
-                if let Some(origin) = east_attacker.lowest_set_square() {
+                if let Some(origin) = east_attacker.lowest_square() {
                     unsafe { moves.push_unchecked(Action::new_en_passant(origin, target)) }
                 }
 
-                if let Some(origin) = west_attacker.lowest_set_square() {
+                if let Some(origin) = west_attacker.lowest_square() {
                     unsafe { moves.push_unchecked(Action::new_en_passant(origin, target)) }
                 }
             } else {
@@ -1230,7 +1283,7 @@ impl Position {
                 ) & capture_rank)
                     .intersects(ennemy_orthogonals)
                 {
-                    if let Some(origin) = east_attacker.lowest_set_square() {
+                    if let Some(origin) = east_attacker.lowest_square() {
                         unsafe { moves.push_unchecked(Action::new_en_passant(origin, target)) }
                     }
                 }
@@ -1241,7 +1294,7 @@ impl Position {
                 ) & capture_rank)
                     .intersects(ennemy_orthogonals)
                 {
-                    if let Some(origin) = west_attacker.lowest_set_square() {
+                    if let Some(origin) = west_attacker.lowest_square() {
                         unsafe { moves.push_unchecked(Action::new_en_passant(origin, target)) }
                     }
                 }
@@ -1277,8 +1330,8 @@ impl Position {
     /// the FIDE rules. It does not account for likely draws.
     pub fn insufficient_material(&self) -> bool {
         // Bare king on both sides
-        if self.color_bitboard(Colour::White).cardinality() == 1
-            && self.color_bitboard(Colour::Black).cardinality() == 1
+        if self.color_bitboard(Colour::White).len() == 1
+            && self.color_bitboard(Colour::Black).len() == 1
         {
             return true;
         }
@@ -1293,14 +1346,14 @@ impl Position {
         let white_pieces = self.color_bitboard(Colour::White);
         let black_pieces = self.color_bitboard(Colour::Black);
 
-        let white_others_count = (others & white_pieces).cardinality();
-        let black_others_count = (others & black_pieces).cardinality();
+        let white_others_count = (others & white_pieces).len();
+        let black_others_count = (others & black_pieces).len();
 
         if white_others_count != 0 && black_others_count != 0 {
-            let white_knights_count = (knights & white_pieces).cardinality();
-            let black_knights_count = (knights & black_pieces).cardinality();
-            let white_bishops_count = (bishops & white_pieces).cardinality();
-            let black_bishops_count = (bishops & black_pieces).cardinality();
+            let white_knights_count = (knights & white_pieces).len();
+            let black_knights_count = (knights & black_pieces).len();
+            let white_bishops_count = (bishops & white_pieces).len();
+            let black_bishops_count = (bishops & black_pieces).len();
             let white_minor_pieces = white_bishops_count + white_knights_count;
             let black_minor_pieces = black_bishops_count + black_knights_count;
             return match (white_minor_pieces, black_minor_pieces) {
@@ -1310,7 +1363,7 @@ impl Position {
                         self.piece_bitboard(PieceKind::Bishop) & Square::DARK_SQUARES;
                     white_bishops_count == 1
                         && black_bishops_count == 1
-                        && bishops_on_dark_squares.cardinality() != 1
+                        && bishops_on_dark_squares.len() != 1
                 }
                 _ => false,
             };
@@ -1319,80 +1372,11 @@ impl Position {
         false
     }
 
-    /// Returns `true` if the NNUE accumulator should be refreshed.
-    #[allow(dead_code)]
-    pub(crate) fn should_refresh_features(&self) -> bool {
-        self.should_refresh
-    }
-
-    /// Clears accumulated NNUE features and refresh flag.
-    #[allow(dead_code)]
-    pub(crate) fn clear_features(&mut self) {
-        self.should_refresh = false;
-        self.added_features.clear();
-        self.removed_features.clear();
-    }
-
-    /// Returns a vector of active NNUE feature indices for this position.
-    #[allow(dead_code)]
-    pub(crate) fn active_features(&self, perspective: Colour) -> Vec<u16> {
-        let mut features = vec![];
-        let king_square = self.king_square(perspective);
-
-        for colour in [Colour::Black, Colour::White] {
-            let colour_bb = self.color_bitboard(colour);
-            for piece_kind in [
-                PieceKind::Pawn,
-                PieceKind::Knight,
-                PieceKind::Bishop,
-                PieceKind::Rook,
-                PieceKind::Queen,
-            ] {
-                for piece_square in self.piece_bitboard(piece_kind) & colour_bb {
-                    features.push(feature_index(king_square, piece_square, piece_kind, colour))
-                }
-            }
-        }
-        features
-    }
-
-    /// Returns accumulated added NNUE features.
-    #[allow(dead_code)]
-    pub(crate) fn added_features(&self) -> &[u16] {
-        &self.added_features
-    }
-
-    /// Returns accumulated removed NNUE features.
-    #[allow(dead_code)]
-    pub(crate) fn removed_features(&self) -> &[u16] {
-        &self.removed_features
-    }
-
-    #[inline(always)]
-    fn add_piece_feature(&mut self, kind: PieceKind, square: Square, colour: Colour) {
-        if self.should_refresh {
-            return;
-        }
-
-        self.added_features
-            .push(piece_feature_index(square, kind, colour));
-    }
-
-    #[inline(always)]
-    fn remove_piece_feature(&mut self, kind: PieceKind, square: Square, colour: Colour) {
-        if self.should_refresh {
-            return;
-        }
-
-        self.removed_features
-            .push(piece_feature_index(square, kind, colour))
-    }
-
     /// Returns the position of the king of the given colour.
     #[inline]
     pub fn king_square(&self, perspective: Colour) -> Square {
         let king = self.piece_bitboard(PieceKind::King) & self.color_bitboard(perspective);
-        unsafe { king.lowest_set_square_unchecked() }
+        unsafe { king.lowest_square_unchecked() }
     }
 
     /// Checks if the side can castle queenside.
