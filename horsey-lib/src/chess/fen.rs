@@ -292,8 +292,8 @@ impl PartialFromStr for Fen {
                     let (piece, left) =
                         Piece::partial_from_str(s).map_err(FenParseError::InvalidPiece)?;
                     let square = squares.next().unwrap();
-                    bitboards[NUM_COLOURS + piece.kind as usize].set(square);
-                    bitboards[piece.colour as usize].set(square);
+                    bitboards[NUM_COLOURS + piece.kind as usize].insert(square);
+                    bitboards[piece.colour as usize].insert(square);
                     s = left
                 }
             }

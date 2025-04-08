@@ -25,6 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //!
 #![feature(portable_simd)]
 
+#[cfg(feature = "brain")]
 pub mod brain;
 pub mod chess;
 #[cfg(feature = "epd")]
@@ -32,5 +33,7 @@ pub mod epd;
 pub mod parsing;
 #[cfg(feature = "pgn")]
 pub mod pgn;
+#[cfg(feature = "search")]
 pub mod search;
+#[cfg(feature = "uci")]
 pub mod uci;
