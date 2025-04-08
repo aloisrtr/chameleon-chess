@@ -55,13 +55,14 @@ impl Colour {
         matches!(self, Colour::Black)
     }
 }
+impl std::fmt::Display for Colour {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", if self.is_black() { "Black" } else { "White" })
+    }
+}
 impl From<bool> for Colour {
     fn from(value: bool) -> Self {
-        if value {
-            Self::Black
-        } else {
-            Self::White
-        }
+        if value { Self::Black } else { Self::White }
     }
 }
 impl From<&bool> for Colour {

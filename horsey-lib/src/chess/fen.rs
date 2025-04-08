@@ -25,7 +25,7 @@ use super::{
 use bitstream_io::{BitRead, BitWrite};
 
 /// FEN string representation.
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Fen {
     pub(crate) bitboards: [Bitboard; NUM_COLOURS + NUM_PIECES],
     pub side_to_move: Colour,
@@ -385,12 +385,6 @@ impl std::str::FromStr for Fen {
 }
 impl std::fmt::Display for Fen {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-impl std::fmt::Debug for Fen {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Pieces
         let mut skip = 0;
         let mut line_length = 0;
         for rank in Rank::iter().rev() {

@@ -667,7 +667,7 @@ impl std::str::FromStr for Square {
 /// They can be added or subtracted to a [`Square`] to obtain the target of the
 /// translation following this delta.
 #[repr(i8)]
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum Delta {
     North = 8,
     South = -8,
@@ -715,4 +715,26 @@ impl Delta {
         Self::SouthEast,
         Self::SouthWest,
     ];
+}
+impl std::fmt::Display for Delta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Self::North => "North",
+            Self::South => "South",
+            Self::East => "East",
+            Self::West => "West",
+            Self::NorthEast => "North-East",
+            Self::NorthWest => "North-West",
+            Self::SouthEast => "South-East",
+            Self::SouthWest => "South-West",
+            Self::KnightNorthEast => "North-North-East",
+            Self::KnightNorthWest => "North-North-West",
+            Self::KnightSouthEast => "South-South-East",
+            Self::KnightSouthWest => "South-South-West",
+            Self::KnightEastNorth => "North-East-East",
+            Self::KnightWestNorth => "North-West-West",
+            Self::KnightEastSouth => "South-East-East",
+            Self::KnightWestSouth => "South-West-West",
+        })
+    }
 }
