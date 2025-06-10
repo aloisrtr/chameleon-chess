@@ -3,16 +3,36 @@
 //! Stefan Meyer-Kahlen and is the most common protocol implement to communicate with
 //! modern chess engines.
 //!
+//! It is implemented as a multiple writer, single reader channel:
+//!
+//!                          +--------------------------+
+//!                      <== |  Client "search" thread  |
+//! +--------+               +--------------------------+
+//! | Server | <==  UCI  ==> | Client "response" thread |
+//! +--------+               +--------------------------+
+//!                      <== |  Client "search" thread  |
+//!                          +--------------------------+
+//!
+//! This allows easy and efficient multi-threaded clients to send messages
+//! to a single endpoint.
+//!
 //! ## Constraints and guarantees
 //! - the implementation is **OS-independant**
 //! - all communication is done **through standard I/O**
-//! - when starting, the engine **waits for the server** (notably `isready` and `setoption` commands)
+//! - when starting, the engine **waits for the server** (notably the `isready` and `setoption` commands)
 //! - the engine should **always be able to process standard input**, even during search
 //! - all commands sent and received will **end with the newline character**
 //! - the engine should never start searching or pondering without receiving a `go` command
 //! - all `go` commands are preceded by a `position` command
 //! - by default, book management should be done by the server
 //! - the implementation should be **fault tolerant**, unexpected tokens or commands should be ignored (although they are reported in debug mode)
+//!
+//! Horsey takes some liberty with the "all communication is done through OS I/O primitives"
+//! part. The implementation allows you to grab your input from anywhere and
+//! send your outputs to anywhere.
+//!
+//! This can be useful for implementers wanting to perform UCI over a network, or
+//! an external peripheral.
 //!
 //! ## Move format
 //! UCI uses **long algebraic notation** for moves, i.e. `<from><to>[promotion]`.

@@ -33,6 +33,7 @@ pub mod epd;
 pub mod parsing;
 #[cfg(feature = "pgn")]
 pub mod pgn;
+pub mod polyglot;
 #[cfg(feature = "search")]
 pub mod search;
 #[cfg(feature = "uci")]

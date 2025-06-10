@@ -1468,10 +1468,14 @@ impl std::fmt::Display for Position {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (r, rank) in Rank::iter().rev().enumerate() {
             for sq in Square::rank_squares_iter(rank) {
-                write!(f, "{} ", match self.piece_on(sq) {
-                    None => ".".to_string(),
-                    Some(p) => p.to_string(),
-                })?
+                write!(
+                    f,
+                    "{} ",
+                    match self.piece_on(sq) {
+                        None => ".".to_string(),
+                        Some(p) => p.to_string(),
+                    }
+                )?
             }
             match r {
                 3 => writeln!(

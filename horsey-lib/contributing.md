@@ -21,8 +21,27 @@ module cannot depend on anything that is defined outside of it.
 >
 > Given how optional NNUE is to library implementers, this seems like a small price to pay.
 
+> Note that the core implementation may still be implemented in a way that facilitates
+> other module's implementations. An example of this is Zobrist hashing, a part of the
+> core `chess` module, which is modeled to match PolyGlot position keys.
+>
+> This does not hinder or change anything for someone that only uses the `chess` module,
+> but avoids an entire file of mostly duplicated code.
+
 On top of that, the library has no default features. We can't define a set of features
-that "everyone will likely want to have".
+that "everyone will likely want to have", except for "basic chess representation"
+(otherwise why depend on this library?)
+
+### Protocols and formats
+Protocols and formats implement tools that are able to parse a "unit" for such
+formats (games for PGN, positions for EPD, entries for PolyGlot opening books, etc).
+
+It is outside of the scope of the library to implement functionnality such as "probing PolyGlot books"
+or "loading PGN files". This has a few advantages:
+- implementers are free to handle IO however they want, including different `async` runtimes
+- the internal representation within the final software can be modelled in an "optimal" way for this specific software
+
+As such, the boundary of what Horsey should handle is "parse the source", but not "provide the source".
 
 ### Dependencies
 Dependencies should be kept to an absolute minimum. Two dependencies are currently needed:
@@ -103,11 +122,11 @@ be encapsulated within asynchronous functions, but it's the job of IO libraries 
 provide that functionnality, not the parser's.
 
 ### Opening books
-Opening data is stored as a game tree with WDL values. The best move can easily be queried
-from a node by scanning its children, and it's a rather efficient representation.
+Text format opening books (PGN or EPD) are supported (see section above).
 
-As of now, only text format opening books (PGN or EPD) are supported. The PolyGlot
-format should be supported in the near future.
+The PolyGlot format is also supported by granting functionnality for parsing/writing entries
+from/to a slice of bytes. This should allow it to work with sources that pull data from
+
 
 ### Endgame tablebases
 We'll see about those later, I still need to research the probing code more in depth.
@@ -119,12 +138,6 @@ and I'm not against implementing other protocols if need be.
 It should be noted that (as far as I know), UCI is the only non-obsolete protocol
 out there.
 
-Protocols should work over *anything* that implements reader/writer functionnality. While
-not a base goal of UCI (it specifies stdin/stdout as channels), this is pretty easy
-to work with in Rust with generics and adds waaay more freedom to implementers. Want
-to talk UCI over a network? Done. Over SPI? Sure. You get the point.
-
-### Async
-Protocols could implement async counterparts, since they technically read/write directly
-instead of just parsing, and that's where the barrier lies. This is not implemented
-currently, but planned. Synchronous variants should still take priority.
+Protocol implementations simply define the *structure* of the exchange, not the
+medium. This should provide maximum flexibility to implementers, at the cost of
+a little more code to write.
